@@ -14,11 +14,22 @@ import Toolbar from './components/Toolbar';
 import EditorPanel from './components/EditorPanel';
 import PreviewPanel from './components/PreviewPanel';
 import Divider from './components/Divider';
+import CopyToast, { type Notice } from './components/CopyToast';
 
 const SPLIT_RATIO_STORAGE_KEY = 'marka:splitRatio';
-const SPLIT_RATIO_MIN = 20;
-const SPLIT_RATIO_MAX = 80;
 const SPLIT_RATIO_DEFAULT = 38.2;
+
+// 各预览模式下预览区所需的最小完整宽度（含外边距/内边距，避免设备帧被裁切）：
+// - PC:     840px 内容 + 24px 左边距 + 安全余量 ≈ 880px
+// - Tablet: 720px 设备帧 + 32px*2 padding ≈ 784px
+// - Mobile: 520px 设备帧 + 32px*2 padding ≈ 584px
+const PREVIEW_MIN_PX_BY_DEVICE: Record<'mobile' | 'tablet' | 'pc', number> = {
+    mobile: 584,
+    tablet: 784,
+    pc: 880,
+};
+// 编辑区最小可读宽度
+const EDITOR_MIN_PX = 280;
 
 function loadSplitRatio(): number {
     try {
@@ -26,9 +37,61 @@ function loadSplitRatio(): number {
         if (raw === null) return SPLIT_RATIO_DEFAULT;
         const v = parseFloat(raw);
         if (!Number.isFinite(v)) return SPLIT_RATIO_DEFAULT;
-        return Math.min(SPLIT_RATIO_MAX, Math.max(SPLIT_RATIO_MIN, v));
+        // 仅做基础范围兜底，实际动态边界在渲染与拖拽时基于容器宽度计算
+        return Math.min(100, Math.max(0, v));
     } catch {
         return SPLIT_RATIO_DEFAULT;
+    }
+}
+
+// 基于容器可用宽度计算中轴线的合法 [minRatio, maxRatio] 区间
+// previewMinPx 随当前预览模式变化，避免在手机/平板模式下的过度限制
+function computeRatioBounds(containerWidth: number, previewMinPx: number): { min: number; max: number } {
+    if (containerWidth <= 0) return { min: SPLIT_RATIO_DEFAULT, max: SPLIT_RATIO_DEFAULT };
+    const dividerWidth = 6;
+    const usable = Math.max(0, containerWidth - dividerWidth);
+    // 编辑区宽度 = (ratio/100) * usable >= EDITOR_MIN_PX
+    const min = Math.max(0, (EDITOR_MIN_PX / usable) * 100);
+    // 预览区宽度 = ((100-ratio)/100) * usable >= previewMinPx
+    const max = Math.min(100, 100 - (previewMinPx / usable) * 100);
+    // 兜底：若容器过小不足以同时满足两端，放宽到允许编辑区更窄
+    if (min > max) return { min: 0, max: 100 };
+    return { min, max };
+}
+
+// 钳制 ratio 到指定区间
+const clampRatio = (ratio: number, bounds: { min: number; max: number }) =>
+    Math.min(bounds.max, Math.max(bounds.min, ratio));
+
+/**
+ * 保存 Blob 到文件。
+ * 支持.showSaveFilePicker 时弹窗让用户选位置并写入，await 真实完成；
+ * 否则降级为 a.click() 立即下载。
+ * 返回 true=已保存，false=用户取消。
+ */
+async function saveBlob(blob: Blob, filename: string, ext: string, label: string): Promise<boolean> {
+    try {
+        const w = window as unknown as { showSaveFilePicker?: (opts: unknown) => Promise<{ createWritable: () => Promise<{ write: (d: Blob) => Promise<void>; close: () => Promise<void> }> }> };
+        if (w.showSaveFilePicker) {
+            const handle = await w.showSaveFilePicker({
+                suggestedName: filename,
+                types: [{ description: label, accept: { [blob.type]: [ext] } }],
+            });
+            const writable = await handle.createWritable();
+            await writable.write(blob);
+            await writable.close();
+        } else {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+        return true;
+    } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return false;
+        throw err;
     }
 }
 
@@ -37,13 +100,16 @@ export default function App() {
     const [markdownInput, setMarkdownInput] = useState<string>(defaultContent);
     const [renderedHtml, setRenderedHtml] = useState<string>('');
     const [activeTheme, setActiveTheme] = useState(THEMES[0].id);
-    const [copied, setCopied] = useState(false);
+    const [notice, setNotice] = useState<Notice | null>(null);
+    const showNotice = (title: string, description: string, tone: Notice['tone']) =>
+        setNotice({ title, description, tone });
     const [isCopying, setIsCopying] = useState(false);
     const [previewDevice, setPreviewDevice] = useState<'mobile' | 'tablet' | 'pc'>('pc');
     const [activePanel, setActivePanel] = useState<'editor' | 'preview'>('editor');
     const [scrollSyncEnabled, setScrollSyncEnabled] = useState(true);
     const [splitRatio, setSplitRatio] = useState<number>(loadSplitRatio);
     const [isDraggingDivider, setIsDraggingDivider] = useState(false);
+    const [containerWidth, setContainerWidth] = useState(0);
     const [isDesktop, setIsDesktop] = useState(() => typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches);
     const previewRef = useRef<HTMLDivElement>(null);
     const editorScrollRef = useRef<HTMLTextAreaElement>(null);
@@ -74,6 +140,31 @@ export default function App() {
         return () => mq.removeEventListener('change', handler);
     }, []);
 
+    // 监听 main 容器实际宽度，用于动态计算中轴线可拖拽边界
+    // 确保预览区在任何模式下都能完整显示（不被裁切）
+    useEffect(() => {
+        const el = mainRef.current;
+        if (!el) return;
+        const update = () => setContainerWidth(el.getBoundingClientRect().width);
+        update();
+        const ro = new ResizeObserver(update);
+        ro.observe(el);
+        window.addEventListener('resize', update);
+        return () => {
+            ro.disconnect();
+            window.removeEventListener('resize', update);
+        };
+    }, []);
+
+    // 基于当前容器宽度与预览模式计算动态边界
+    const previewMinPx = PREVIEW_MIN_PX_BY_DEVICE[previewDevice];
+    const ratioBounds = computeRatioBounds(containerWidth, previewMinPx);
+
+    // 容器宽度变化（如窗口缩放）时，若已保存的 ratio 越界则自动收回
+    useEffect(() => {
+        setSplitRatio((prev) => clampRatio(prev, ratioBounds));
+    }, [ratioBounds.min, ratioBounds.max]);
+
     // 中轴线拖拽：基于指针在 main 容器内的水平位置计算新比例
     const handleDividerPointerDown = useCallback((e: React.PointerEvent) => {
         if (!mainRef.current) return;
@@ -84,11 +175,13 @@ export default function App() {
         document.body.style.userSelect = 'none';
 
         const rect = mainRef.current.getBoundingClientRect();
+        // 拖拽开始时锁定本次的边界，避免拖拽中容器宽度抖动
+        const bounds = computeRatioBounds(rect.width, PREVIEW_MIN_PX_BY_DEVICE[previewDevice]);
 
         const applyClientX = (clientX: number) => {
             const x = clientX - rect.left;
             const ratio = (x / rect.width) * 100;
-            setSplitRatio(Math.min(SPLIT_RATIO_MAX, Math.max(SPLIT_RATIO_MIN, ratio)));
+            setSplitRatio(clampRatio(ratio, bounds));
         };
 
         const onMove = (ev: PointerEvent) => applyClientX(ev.clientX);
@@ -104,7 +197,7 @@ export default function App() {
         window.addEventListener('pointermove', onMove);
         window.addEventListener('pointerup', onUp);
         window.addEventListener('pointercancel', onUp);
-    }, []);
+    }, [previewDevice]);
 
     const toggleTheme = () => {
         setThemeMode((prev) => {
@@ -227,8 +320,7 @@ export default function App() {
             });
             await navigator.clipboard.write([clipboardItem]);
 
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
+            showNotice('已复制到剪贴板', '现在可前往公众号编辑器粘贴', 'success');
         } catch (err) {
             console.error('Copy failed', err);
             alert('复制格式失败，请检查浏览器剪贴板权限');
@@ -237,45 +329,47 @@ export default function App() {
         }
     };
 
-    const handleExportHtml = () => {
-        // Clean internal attributes before exporting
-        const cleanHtml = cleanInternalAttributes(renderedHtml);
-        const blob = new Blob([cleanHtml], { type: 'text/html;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `Marka_Article_${new Date().getTime()}.html`;
-        a.click();
-        URL.revokeObjectURL(url);
+    const handleExportHtml = async () => {
+        const blob = new Blob([cleanInternalAttributes(renderedHtml)], { type: 'text/html;charset=utf-8' });
+        const filename = `Marka_Article_${Date.now()}.html`;
+        try {
+            const saved = await saveBlob(blob, filename, '.html', 'HTML 文档');
+            if (saved) showNotice('HTML 已导出', '文件已保存到指定位置', 'download');
+        } catch (err) {
+            console.error('HTML export failed', err);
+            showNotice('导出失败', '请稍后重试', 'error');
+        }
     };
 
-    const handleExportPdf = () => {
+    const handleExportPdf = async () => {
         if (!previewRef.current) return;
-        const element = previewRef.current;
         const opt = {
             margin: 10,
-            filename: `Marka_Article_${new Date().getTime()}.pdf`,
             image: { type: 'jpeg' as const, quality: 0.98 },
             html2canvas: { scale: 2, useCORS: true, letterRendering: true, backgroundColor: document.documentElement.classList.contains('dark') ? '#000000' : '#ffffff' },
             jsPDF: { unit: 'mm' as const, format: 'a4', orientation: 'portrait' as const }
         };
-        const clonedElement = element.cloneNode(true) as HTMLElement;
-
-        // Clean internal attributes from cloned element for PDF export
-        const allElements = clonedElement.querySelectorAll('*');
-        allElements.forEach(el => {
+        const clonedElement = previewRef.current.cloneNode(true) as HTMLElement;
+        clonedElement.querySelectorAll('*').forEach(el => {
             el.removeAttribute('data-md-type');
             el.removeAttribute('data-md-index');
         });
-
         const cloneContainer = document.createElement('div');
         cloneContainer.style.background = document.documentElement.classList.contains('dark') ? '#000000' : '#ffffff';
         cloneContainer.appendChild(clonedElement);
-
         document.body.appendChild(cloneContainer);
-        html2pdf().set(opt).from(cloneContainer).save().then(() => {
-            document.body.removeChild(cloneContainer);
-        });
+
+        try {
+            const pdfBlob = await html2pdf().set(opt).from(cloneContainer).output('blob') as unknown as Blob;
+            const filename = `Marka_Article_${Date.now()}.pdf`;
+            const saved = await saveBlob(pdfBlob, filename, '.pdf', 'PDF 文档');
+            if (saved) showNotice('PDF 已导出', '文件已保存到指定位置', 'download');
+        } catch (err) {
+            console.error('PDF export failed', err);
+            showNotice('导出失败', 'PDF 生成失败，请重试', 'error');
+        } finally {
+            cloneContainer.remove();
+        }
     };
 
     const handleImageClick = useCallback((info: { type: string; index: number; src?: string; alt?: string; content?: string }) => {
@@ -317,16 +411,11 @@ export default function App() {
     };
 
     // 中轴线动态分栏：编辑区 fr / 分隔条 / 预览区 fr
+    // 渲染时再次钳制到当前容器边界，防止状态未及时更新导致预览区被压缩到裁切
+    const safeRatio = clampRatio(splitRatio, ratioBounds);
     const mainGridStyle: React.CSSProperties = {
         gridTemplateColumns: isDesktop
-            ? `${splitRatio}fr 6px ${100 - splitRatio}fr`
-            : '1fr',
-    };
-
-    // 工具栏与编辑/预览对齐（无分隔条列）
-    const toolbarGridStyle: React.CSSProperties = {
-        gridTemplateColumns: isDesktop
-            ? `${splitRatio}fr ${100 - splitRatio}fr`
+            ? `${safeRatio}fr 6px ${100 - safeRatio}fr`
             : '1fr',
     };
 
@@ -355,11 +444,8 @@ export default function App() {
                 </button>
             </div>
 
-            {/* 排版设置 & 工具栏 (桌面端) */}
-            <div
-                className={`glass-toolbar hidden md:grid grid-cols-1 px-0 z-[90] ${isDraggingDivider ? '' : 'transition-all duration-500'}`}
-                style={toolbarGridStyle}
-            >
+            {/* 排版设置 & 工具栏 (桌面端)：单行 flex，不再跟随中轴线分栏，避免极端比例下内容溢出 */}
+            <div className="glass-toolbar hidden md:flex items-center justify-between gap-2 px-2 lg:px-4 z-[90]">
                 <ThemeSelector activeTheme={activeTheme} onThemeChange={setActiveTheme} />
                 <Toolbar
                     previewDevice={previewDevice}
@@ -367,7 +453,6 @@ export default function App() {
                     onExportPdf={handleExportPdf}
                     onExportHtml={handleExportHtml}
                     onCopy={handleCopy}
-                    copied={copied}
                     isCopying={isCopying}
                     scrollSyncEnabled={scrollSyncEnabled}
                     onToggleScrollSync={() => setScrollSyncEnabled((prev) => !prev)}
@@ -385,7 +470,6 @@ export default function App() {
                     onExportPdf={handleExportPdf}
                     onExportHtml={handleExportHtml}
                     onCopy={handleCopy}
-                    copied={copied}
                     isCopying={isCopying}
                     scrollSyncEnabled={scrollSyncEnabled}
                     onToggleScrollSync={() => setScrollSyncEnabled((prev) => !prev)}
@@ -411,7 +495,9 @@ export default function App() {
                     <Divider
                         onPointerDown={handleDividerPointerDown}
                         isDragging={isDraggingDivider}
-                        ratio={splitRatio}
+                        ratio={safeRatio}
+                        minRatio={ratioBounds.min}
+                        maxRatio={ratioBounds.max}
                     />
                 )}
                 <div className={`${activePanel === 'preview' ? 'flex' : 'hidden'} md:flex flex-col overflow-hidden`}>
@@ -429,6 +515,8 @@ export default function App() {
                     />
                 </div>
             </main>
+
+            <CopyToast notice={notice} onClose={() => setNotice(null)} />
 
         </div>
     );

@@ -58,15 +58,15 @@ export default function ThemeSelector({ activeTheme, onThemeChange }: ThemeSelec
     const isInDropdown = !pillThemes.some(theme => theme.id === activeTheme);
 
     return (
-        <div className="flex items-center flex-wrap gap-2 lg:gap-4 px-4 lg:px-6 py-3 border-r border-transparent md:border-[#00000015] md:dark:border-[#ffffff15] shrink-0">
-            <span className="text-[12px] font-semibold text-[#86868b] uppercase tracking-widest hidden xl:block shrink-0">排版风格</span>
+        <div className="flex items-center gap-2 lg:gap-3 px-2 lg:px-4 py-3 min-w-0 shrink">
+            <span className="text-[12px] font-semibold text-[#86868b] uppercase tracking-widest hidden 2xl:block shrink-0">排版风格</span>
 
-            <div className="flex items-center gap-1.5 bg-[#00000008] dark:bg-[#ffffff10] p-1 rounded-full backdrop-blur-md shrink-0">
+            <div className="flex items-center gap-1.5 bg-[#00000008] dark:bg-[#ffffff10] p-1 rounded-full backdrop-blur-md shrink-0 max-w-full overflow-x-auto no-scrollbar">
                 {pillThemes.map(theme => (
                     <button
                         key={theme.id}
                         onClick={() => onThemeChange(theme.id)}
-                        className={`px-4 py-1.5 rounded-full text-[13px] font-medium transition-all ${activeTheme === theme.id
+                        className={`px-3 lg:px-4 py-1.5 rounded-full text-[13px] font-medium transition-all whitespace-nowrap ${activeTheme === theme.id
                             ? 'bg-white dark:bg-[#2c2c2e] text-[#1d1d1f] dark:text-[#f5f5f7] shadow-sm'
                             : 'text-[#86868b] hover:text-[#1d1d1f] dark:text-[#a1a1a6] dark:hover:text-[#f5f5f7]'
                             }`}
@@ -79,7 +79,7 @@ export default function ThemeSelector({ activeTheme, onThemeChange }: ThemeSelec
             <div className="relative shrink-0">
                 <button
                     onClick={() => setIsThemeOpen(!isThemeOpen)}
-                    className={`apple-export-btn flex items-center gap-2 !px-4 !py-1.5 !text-[13px] transition-all ${isInDropdown ? 'bg-white dark:bg-[#2c2c2e] text-[#1d1d1f] dark:text-[#f5f5f7] border-[#00000010] dark:border-[#ffffff10] shadow-sm' : 'border-transparent bg-transparent hover:bg-transparent dark:bg-transparent text-[#86868b] dark:text-[#a1a1a6] shadow-none hover:text-[#1d1d1f] dark:hover:text-[#f5f5f7]'}`}
+                    className={`apple-export-btn flex items-center gap-2 !px-3 lg:!px-4 !py-1.5 !text-[13px] transition-all whitespace-nowrap ${isInDropdown ? 'bg-white dark:bg-[#2c2c2e] text-[#1d1d1f] dark:text-[#f5f5f7] border-[#00000010] dark:border-[#ffffff10] shadow-sm' : 'border-transparent bg-transparent hover:bg-transparent dark:bg-transparent text-[#86868b] dark:text-[#a1a1a6] shadow-none hover:text-[#1d1d1f] dark:hover:text-[#f5f5f7]'}`}
                 >
                     {isInDropdown ? selectedThemeName : `全部 ${THEMES.length} 款`}
                     <ChevronDown size={14} className={`transition-transform duration-300 ${isThemeOpen ? 'rotate-180' : ''}`} />
@@ -167,8 +167,8 @@ export default function ThemeSelector({ activeTheme, onThemeChange }: ThemeSelec
             </div>
 
             {/* Theme description next to selectors */}
-            <div className="hidden lg:flex items-center ml-4 pl-4 border-l border-[#00000015] dark:border-[#ffffff15]">
-                <p className="text-[13px] text-[#86868b] dark:text-[#a1a1a6] font-medium tracking-wide truncate max-w-[300px] xl:max-w-[450px]">
+            <div className="hidden 2xl:flex items-center ml-2 pl-3 border-l border-[#00000015] dark:border-[#ffffff15] min-w-0">
+                <p className="text-[13px] text-[#86868b] dark:text-[#a1a1a6] font-medium tracking-wide truncate max-w-[300px] 2xl:max-w-[450px]">
                     <span className="text-[#1d1d1f] dark:text-[#f5f5f7] font-semibold mr-1">{THEMES.find(t => t.id === activeTheme)?.name}：</span>
                     {THEMES.find(t => t.id === activeTheme)?.description}
                 </p>
