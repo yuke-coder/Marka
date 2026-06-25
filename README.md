@@ -1,10 +1,10 @@
-# Raphael Publish - 公众号排版大师
+# Marka - 排版君
 
 专为**微信公众号**与**内容创作者**打造的现代 Markdown 排版引擎。
 
-> **在线体验**：[https://publish.raphael.app](https://publish.raphael.app)
+> **在线体验**：[https://github.com/yuke-coder/Marka](https://github.com/yuke-coder/Marka)
 
-![Raphael Publish 截图](media/screenshot.png)
+![Marka 截图](media/screenshot.png)
 
 
 ## 功能特性
@@ -27,11 +27,11 @@
 
 <p align="center">
   <a href="media/demo.mp4">
-    <img src="media/record.gif" alt="Raphael Publish 功能演示（点击播放 MP4）" />
+    <img src="media/record.gif" alt="Marka 功能演示（点击播放 MP4）" />
   </a>
 </p>
 <p align="center">
-  <a href="https://publish.raphael.app">
+  <a href="https://github.com/yuke-coder/Marka">
     <img src="https://img.shields.io/badge/%E2%96%B6%20Live%20Preview-Visit%20Pages-2ea44f?style=for-the-badge" alt="Live Preview on Pages" />
   </a>
   <a href="media/demo.mp4">

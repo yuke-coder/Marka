@@ -38,16 +38,16 @@ describe('insertAtSelection', () => {
         textarea.selectionEnd = 11;
 
         let nextValue = '';
-        insertAtSelection(textarea, 'Raphael', (value) => {
+        insertAtSelection(textarea, 'Marka', (value) => {
             nextValue = value;
             textarea.value = value;
         });
 
-        expect(nextValue).toBe('hello Raphael');
+        expect(nextValue).toBe('hello Marka');
 
         vi.runAllTimers();
 
-        expect(textarea.selectionStart).toBe('hello Raphael'.length);
-        expect(textarea.selectionEnd).toBe('hello Raphael'.length);
+        expect(textarea.selectionStart).toBe('hello Marka'.length);
+        expect(textarea.selectionEnd).toBe('hello Marka'.length);
     });
 });

@@ -13,6 +13,24 @@ import ThemeSelector from './components/ThemeSelector';
 import Toolbar from './components/Toolbar';
 import EditorPanel from './components/EditorPanel';
 import PreviewPanel from './components/PreviewPanel';
+import Divider from './components/Divider';
+
+const SPLIT_RATIO_STORAGE_KEY = 'marka:splitRatio';
+const SPLIT_RATIO_MIN = 20;
+const SPLIT_RATIO_MAX = 80;
+const SPLIT_RATIO_DEFAULT = 38.2;
+
+function loadSplitRatio(): number {
+    try {
+        const raw = localStorage.getItem(SPLIT_RATIO_STORAGE_KEY);
+        if (raw === null) return SPLIT_RATIO_DEFAULT;
+        const v = parseFloat(raw);
+        if (!Number.isFinite(v)) return SPLIT_RATIO_DEFAULT;
+        return Math.min(SPLIT_RATIO_MAX, Math.max(SPLIT_RATIO_MIN, v));
+    } catch {
+        return SPLIT_RATIO_DEFAULT;
+    }
+}
 
 export default function App() {
     const [themeMode, setThemeMode] = useState<'light' | 'dark'>('light');
@@ -24,15 +42,68 @@ export default function App() {
     const [previewDevice, setPreviewDevice] = useState<'mobile' | 'tablet' | 'pc'>('pc');
     const [activePanel, setActivePanel] = useState<'editor' | 'preview'>('editor');
     const [scrollSyncEnabled, setScrollSyncEnabled] = useState(true);
+    const [splitRatio, setSplitRatio] = useState<number>(loadSplitRatio);
+    const [isDraggingDivider, setIsDraggingDivider] = useState(false);
+    const [isDesktop, setIsDesktop] = useState(() => typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches);
     const previewRef = useRef<HTMLDivElement>(null);
     const editorScrollRef = useRef<HTMLTextAreaElement>(null);
     const previewOuterScrollRef = useRef<HTMLDivElement>(null);
     const previewInnerScrollRef = useRef<HTMLDivElement>(null);
+    const mainRef = useRef<HTMLElement>(null);
     const scrollSyncLockRef = useRef<'editor' | 'preview' | null>(null);
     const scrollLockReleaseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     useEffect(() => {
         // Enforce light mode as default, do not follow system preferences
+    }, []);
+
+    // 持久化中轴线位置
+    useEffect(() => {
+        try {
+            localStorage.setItem(SPLIT_RATIO_STORAGE_KEY, String(splitRatio));
+        } catch {
+            // ignore quota / privacy errors
+        }
+    }, [splitRatio]);
+
+    // 跟踪桌面端断点，用于在移动端隐藏分隔条
+    useEffect(() => {
+        const mq = window.matchMedia('(min-width: 768px)');
+        const handler = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
+        mq.addEventListener('change', handler);
+        return () => mq.removeEventListener('change', handler);
+    }, []);
+
+    // 中轴线拖拽：基于指针在 main 容器内的水平位置计算新比例
+    const handleDividerPointerDown = useCallback((e: React.PointerEvent) => {
+        if (!mainRef.current) return;
+        e.preventDefault();
+        (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+        setIsDraggingDivider(true);
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+
+        const rect = mainRef.current.getBoundingClientRect();
+
+        const applyClientX = (clientX: number) => {
+            const x = clientX - rect.left;
+            const ratio = (x / rect.width) * 100;
+            setSplitRatio(Math.min(SPLIT_RATIO_MAX, Math.max(SPLIT_RATIO_MIN, ratio)));
+        };
+
+        const onMove = (ev: PointerEvent) => applyClientX(ev.clientX);
+        const onUp = () => {
+            setIsDraggingDivider(false);
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            window.removeEventListener('pointermove', onMove);
+            window.removeEventListener('pointerup', onUp);
+            window.removeEventListener('pointercancel', onUp);
+        };
+
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', onUp);
+        window.addEventListener('pointercancel', onUp);
     }, []);
 
     const toggleTheme = () => {
@@ -173,7 +244,7 @@ export default function App() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `Raphael_Article_${new Date().getTime()}.html`;
+        a.download = `Marka_Article_${new Date().getTime()}.html`;
         a.click();
         URL.revokeObjectURL(url);
     };
@@ -183,7 +254,7 @@ export default function App() {
         const element = previewRef.current;
         const opt = {
             margin: 10,
-            filename: `Raphael_Article_${new Date().getTime()}.pdf`,
+            filename: `Marka_Article_${new Date().getTime()}.pdf`,
             image: { type: 'jpeg' as const, quality: 0.98 },
             html2canvas: { scale: 2, useCORS: true, letterRendering: true, backgroundColor: document.documentElement.classList.contains('dark') ? '#000000' : '#ffffff' },
             jsPDF: { unit: 'mm' as const, format: 'a4', orientation: 'portrait' as const }
@@ -245,10 +316,18 @@ export default function App() {
         return 'w-[840px] xl:w-[1024px] max-w-[95%]';
     };
 
-    const gridLayoutClass = () => {
-        if (previewDevice === 'mobile') return 'md:grid-cols-[55fr_45fr]';
-        if (previewDevice === 'tablet') return 'md:grid-cols-[45fr_55fr]';
-        return 'md:grid-cols-[38.2fr_61.8fr]';
+    // 中轴线动态分栏：编辑区 fr / 分隔条 / 预览区 fr
+    const mainGridStyle: React.CSSProperties = {
+        gridTemplateColumns: isDesktop
+            ? `${splitRatio}fr 6px ${100 - splitRatio}fr`
+            : '1fr',
+    };
+
+    // 工具栏与编辑/预览对齐（无分隔条列）
+    const toolbarGridStyle: React.CSSProperties = {
+        gridTemplateColumns: isDesktop
+            ? `${splitRatio}fr ${100 - splitRatio}fr`
+            : '1fr',
     };
 
     return (
@@ -277,7 +356,10 @@ export default function App() {
             </div>
 
             {/* 排版设置 & 工具栏 (桌面端) */}
-            <div className={`glass-toolbar hidden md:grid grid-cols-1 ${gridLayoutClass()} px-0 z-[90] transition-all duration-500`}>
+            <div
+                className={`glass-toolbar hidden md:grid grid-cols-1 px-0 z-[90] ${isDraggingDivider ? '' : 'transition-all duration-500'}`}
+                style={toolbarGridStyle}
+            >
                 <ThemeSelector activeTheme={activeTheme} onThemeChange={setActiveTheme} />
                 <Toolbar
                     previewDevice={previewDevice}
@@ -311,7 +393,11 @@ export default function App() {
             </div>
 
             {/* 编辑区 & 预览区 */}
-            <main className={`flex-1 overflow-hidden grid grid-cols-1 ${gridLayoutClass()} relative transition-all duration-500`}>
+            <main
+                ref={mainRef}
+                className={`flex-1 overflow-hidden grid grid-cols-1 relative ${isDraggingDivider ? '' : 'transition-all duration-500'}`}
+                style={mainGridStyle}
+            >
                 <div className={`${activePanel === 'editor' ? 'flex' : 'hidden'} md:flex flex-col overflow-hidden`}>
                     <EditorPanel
                         markdownInput={markdownInput}
@@ -321,6 +407,13 @@ export default function App() {
                         scrollSyncEnabled={scrollSyncEnabled}
                     />
                 </div>
+                {isDesktop && (
+                    <Divider
+                        onPointerDown={handleDividerPointerDown}
+                        isDragging={isDraggingDivider}
+                        ratio={splitRatio}
+                    />
+                )}
                 <div className={`${activePanel === 'preview' ? 'flex' : 'hidden'} md:flex flex-col overflow-hidden`}>
                     <PreviewPanel
                         renderedHtml={renderedHtml}

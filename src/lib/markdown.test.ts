@@ -41,7 +41,7 @@ describe('applyTheme', () => {
     });
 
     it('keeps highlighted comments non-italic for apple', () => {
-        const rawHtml = renderMarkdown('```javascript\n// 中文注释\nconst raphael = 1;\n```');
+        const rawHtml = renderMarkdown('```javascript\n// 中文注释\nconst marka = 1;\n```');
         const themed = applyTheme(rawHtml, 'apple');
         const doc = new DOMParser().parseFromString(themed, 'text/html');
         const code = doc.querySelector('pre code');
@@ -53,7 +53,7 @@ describe('applyTheme', () => {
     });
 
     it('does not override bloomberg block-code font inheritance', () => {
-        const rawHtml = renderMarkdown('```javascript\n// terminal theme\nconst raphael = 1;\n```');
+        const rawHtml = renderMarkdown('```javascript\n// terminal theme\nconst marka = 1;\n```');
         const themed = applyTheme(rawHtml, 'bloomberg');
         const doc = new DOMParser().parseFromString(themed, 'text/html');
         const container = doc.querySelector('body > div');
