@@ -32,6 +32,10 @@ jobs:
           node-version: 20
           cache: 'pnpm'
 
+      - name: Setup Pages
+        id: pages
+        uses: actions/configure-pages@v4
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -47,10 +51,7 @@ jobs:
       - name: Build
         run: pnpm build
         env:
-          GITHUB_PAGES: 'true'
-
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
+          VITE_PAGES_BASE_PATH: ${{ steps.pages.outputs.base_path }}
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

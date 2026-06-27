@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { PenLine, Eye } from 'lucide-react';
 import html2pdf from 'html2pdf.js';
 import { md, preprocessMarkdown, applyTheme } from './lib/markdown';
@@ -10,7 +10,7 @@ import { findImagePosition, selectTextAreaRange } from './lib/imageSelector';
 import { findElementPosition, type ElementLocation } from './lib/markdownLocator';
 import Header from './components/Header';
 import ThemeSelector from './components/ThemeSelector';
-import Toolbar from './components/Toolbar';
+import { DesktopToolbar, MobileToolbar } from './components/Toolbar';
 import EditorPanel from './components/EditorPanel';
 import PreviewPanel from './components/PreviewPanel';
 import Divider from './components/Divider';
@@ -18,6 +18,18 @@ import CopyToast, { type Notice } from './components/CopyToast';
 
 const SPLIT_RATIO_STORAGE_KEY = 'marka:splitRatio';
 const SPLIT_RATIO_DEFAULT = 38.2;
+const PREVIEW_DEVICE_STORAGE_KEY = 'marka:previewDevice';
+const PREVIEW_DEVICE_DEFAULT: 'mobile' | 'tablet' | 'pc' = 'pc';
+
+function loadPreviewDevice(): 'mobile' | 'tablet' | 'pc' {
+    try {
+        const raw = localStorage.getItem(PREVIEW_DEVICE_STORAGE_KEY);
+        if (raw === 'mobile' || raw === 'tablet' || raw === 'pc') return raw;
+        return PREVIEW_DEVICE_DEFAULT;
+    } catch {
+        return PREVIEW_DEVICE_DEFAULT;
+    }
+}
 
 // 各预览模式下预览区所需的最小完整宽度（含外边距/内边距，避免设备帧被裁切）：
 // - PC:     840px 内容 + 24px 左边距 + 安全余量 ≈ 880px
@@ -70,23 +82,35 @@ const clampRatio = (ratio: number, bounds: { min: number; max: number }) =>
  * 返回 true=已保存，false=用户取消。
  */
 async function saveBlob(blob: Blob, filename: string, ext: string, label: string): Promise<boolean> {
+    const baseMime = blob.type.split(';')[0].trim() || 'application/octet-stream';
+    const doAnchorDownload = () => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
     try {
         const w = window as unknown as { showSaveFilePicker?: (opts: unknown) => Promise<{ createWritable: () => Promise<{ write: (d: Blob) => Promise<void>; close: () => Promise<void> }> }> };
         if (w.showSaveFilePicker) {
-            const handle = await w.showSaveFilePicker({
-                suggestedName: filename,
-                types: [{ description: label, accept: { [blob.type]: [ext] } }],
-            });
-            const writable = await handle.createWritable();
-            await writable.write(blob);
-            await writable.close();
+            try {
+                const handle = await w.showSaveFilePicker({
+                    suggestedName: filename,
+                    types: [{ description: label, accept: { [baseMime]: [ext] } }],
+                });
+                const writable = await handle.createWritable();
+                await writable.write(blob);
+                await writable.close();
+                return true;
+            } catch (pickerErr) {
+                if (pickerErr instanceof DOMException && pickerErr.name === 'AbortError') return false;
+                console.warn('showSaveFilePicker failed, falling back to anchor download:', pickerErr);
+                doAnchorDownload();
+                return true;
+            }
         } else {
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = filename;
-            a.click();
-            URL.revokeObjectURL(url);
+            doAnchorDownload();
         }
         return true;
     } catch (err) {
@@ -95,7 +119,31 @@ async function saveBlob(blob: Blob, filename: string, ext: string, label: string
     }
 }
 
+function isInIframe(): boolean {
+    try {
+        return typeof window !== 'undefined' && window.self !== window.top;
+    } catch {
+        return true;
+    }
+}
+
+function getForceMobileMode(): boolean {
+    if (typeof window === 'undefined') return false;
+    if (isInIframe()) return false;
+    const params = new URLSearchParams(window.location.search);
+    return params.get('mobile') === '1';
+}
+
+function isEmbeddedMobileMode(): boolean {
+    if (typeof window === 'undefined') return false;
+    if (isInIframe()) return true;
+    const params = new URLSearchParams(window.location.search);
+    return params.get('embed') === '1';
+}
+
 export default function App() {
+    const forceMobile = getForceMobileMode();
+    const embedded = isEmbeddedMobileMode();
     const [themeMode, setThemeMode] = useState<'light' | 'dark'>('light');
     const [markdownInput, setMarkdownInput] = useState<string>(defaultContent);
     const [renderedHtml, setRenderedHtml] = useState<string>('');
@@ -104,13 +152,17 @@ export default function App() {
     const showNotice = (title: string, description: string, tone: Notice['tone']) =>
         setNotice({ title, description, tone });
     const [isCopying, setIsCopying] = useState(false);
-    const [previewDevice, setPreviewDevice] = useState<'mobile' | 'tablet' | 'pc'>('pc');
-    const [activePanel, setActivePanel] = useState<'editor' | 'preview'>('editor');
+    const [previewDevice, setPreviewDevice] = useState<'mobile' | 'tablet' | 'pc'>(() =>
+        embedded ? 'mobile' : loadPreviewDevice()
+    );
+    const [activePanel, setActivePanel] = useState<'editor' | 'preview'>(embedded ? 'preview' : 'editor');
     const [scrollSyncEnabled, setScrollSyncEnabled] = useState(true);
     const [splitRatio, setSplitRatio] = useState<number>(loadSplitRatio);
     const [isDraggingDivider, setIsDraggingDivider] = useState(false);
     const [containerWidth, setContainerWidth] = useState(0);
-    const [isDesktop, setIsDesktop] = useState(() => typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches);
+    const [isDesktop, setIsDesktop] = useState(() =>
+        embedded ? false : (typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches)
+    );
     const previewRef = useRef<HTMLDivElement>(null);
     const editorScrollRef = useRef<HTMLTextAreaElement>(null);
     const previewOuterScrollRef = useRef<HTMLDivElement>(null);
@@ -119,8 +171,63 @@ export default function App() {
     const scrollSyncLockRef = useRef<'editor' | 'preview' | null>(null);
     const scrollLockReleaseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    useEffect(() => {
-        // Enforce light mode as default, do not follow system preferences
+    const swipeRef = useRef<{ startX: number; startY: number; locked: boolean | 'h' | 'v' }>({ startX: 0, startY: 0, locked: false });
+    const [swipeDx, setSwipeDx] = useState(0);
+    const [isSwiping, setIsSwiping] = useState(false);
+    const tabIndicatorX = useMemo(() => {
+        const w = typeof window !== 'undefined' ? window.innerWidth : 390;
+        const base = activePanel === 'editor' ? 0 : 1;
+        const drag = activePanel === 'editor' ? Math.max(0, Math.min(1, -swipeDx / w)) : -Math.max(0, Math.min(1, swipeDx / w));
+        return base + drag;
+    }, [activePanel, swipeDx]);
+
+    const handleTouchStart = useCallback((e: React.TouchEvent) => {
+        if (isDesktop) return;
+        const t = e.touches[0];
+        swipeRef.current = { startX: t.clientX, startY: t.clientY, locked: false };
+        setSwipeDx(0);
+    }, [isDesktop]);
+
+    const handleTouchMove = useCallback((e: React.TouchEvent) => {
+        if (isDesktop) return;
+        const s = swipeRef.current;
+        const t = e.touches[0];
+        const dx = t.clientX - s.startX;
+        const dy = t.clientY - s.startY;
+
+        if (!s.locked) {
+            if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+            s.locked = Math.abs(dx) > Math.abs(dy) ? 'h' : 'v';
+            if (s.locked === 'h') setIsSwiping(true);
+        }
+        if (s.locked === 'h') {
+            e.preventDefault();
+            const clamped = activePanel === 'editor' ? Math.min(0, Math.max(-window.innerWidth, dx)) : Math.min(window.innerWidth, Math.max(0, dx));
+            setSwipeDx(clamped);
+        }
+    }, [isDesktop, activePanel]);
+
+    const handleTouchEnd = useCallback(() => {
+        if (isDesktop) return;
+        const s = swipeRef.current;
+        if (s.locked === 'h') {
+            const threshold = window.innerWidth * 0.2;
+            const dx = swipeDx;
+            if ((activePanel === 'editor' && dx < -threshold) || (activePanel === 'preview' && dx > threshold)) {
+                setActivePanel(activePanel === 'editor' ? 'preview' : 'editor');
+            }
+            setSwipeDx(0);
+            setIsSwiping(false);
+        }
+        s.locked = false;
+    }, [isDesktop, activePanel, swipeDx]);
+
+    const resetScrollSyncLock = useCallback(() => {
+        scrollSyncLockRef.current = null;
+        if (scrollLockReleaseTimeoutRef.current) {
+            clearTimeout(scrollLockReleaseTimeoutRef.current);
+            scrollLockReleaseTimeoutRef.current = null;
+        }
     }, []);
 
     // 持久化中轴线位置
@@ -132,13 +239,30 @@ export default function App() {
         }
     }, [splitRatio]);
 
+    // 持久化预览设备模式
+    useEffect(() => {
+        try {
+            localStorage.setItem(PREVIEW_DEVICE_STORAGE_KEY, previewDevice);
+        } catch {
+            // ignore quota / privacy errors
+        }
+    }, [previewDevice]);
+
+    // 移动端视图下强制使用手机预览模式
+    useEffect(() => {
+        if (embedded && previewDevice !== 'mobile') {
+            setPreviewDevice('mobile');
+        }
+    }, [embedded, previewDevice]);
+
     // 跟踪桌面端断点，用于在移动端隐藏分隔条
     useEffect(() => {
+        if (embedded) return;
         const mq = window.matchMedia('(min-width: 768px)');
         const handler = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
         mq.addEventListener('change', handler);
         return () => mq.removeEventListener('change', handler);
-    }, []);
+    }, [embedded]);
 
     // 监听 main 容器实际宽度，用于动态计算中轴线可拖拽边界
     // 确保预览区在任何模式下都能完整显示（不被裁切）
@@ -161,9 +285,12 @@ export default function App() {
     const ratioBounds = computeRatioBounds(containerWidth, previewMinPx);
 
     // 容器宽度变化（如窗口缩放）时，若已保存的 ratio 越界则自动收回
+    // 初始化阶段 containerWidth 为 0，ratioBounds 为默认值 {DEFAULT,DEFAULT}，
+    // 此时不应钳制，否则会把用户保存的 ratio 误覆盖为默认值并持久化到 localStorage
     useEffect(() => {
+        if (containerWidth <= 0) return;
         setSplitRatio((prev) => clampRatio(prev, ratioBounds));
-    }, [ratioBounds.min, ratioBounds.max]);
+    }, [ratioBounds.min, ratioBounds.max, containerWidth]);
 
     // 中轴线拖拽：基于指针在 main 容器内的水平位置计算新比例
     const handleDividerPointerDown = useCallback((e: React.PointerEvent) => {
@@ -221,33 +348,19 @@ export default function App() {
     }, [markdownInput, activeTheme]);
 
     useEffect(() => {
-        if (!scrollSyncEnabled) {
-            scrollSyncLockRef.current = null;
-            if (scrollLockReleaseTimeoutRef.current) {
-                clearTimeout(scrollLockReleaseTimeoutRef.current);
-                scrollLockReleaseTimeoutRef.current = null;
-            }
-        }
-    }, [scrollSyncEnabled]);
+        if (!scrollSyncEnabled) resetScrollSyncLock();
+    }, [scrollSyncEnabled, resetScrollSyncLock]);
 
     useEffect(() => {
-        scrollSyncLockRef.current = null;
-        if (scrollLockReleaseTimeoutRef.current) {
-            clearTimeout(scrollLockReleaseTimeoutRef.current);
-            scrollLockReleaseTimeoutRef.current = null;
-        }
-    }, [previewDevice]);
+        resetScrollSyncLock();
+    }, [previewDevice, resetScrollSyncLock]);
 
     useEffect(() => {
-        return () => {
-            if (scrollLockReleaseTimeoutRef.current) {
-                clearTimeout(scrollLockReleaseTimeoutRef.current);
-            }
-        };
-    }, []);
+        return () => resetScrollSyncLock();
+    }, [resetScrollSyncLock]);
 
     const getActivePreviewScrollElement = () => {
-        if (previewDevice === 'pc') return previewOuterScrollRef.current;
+        if (previewDevice === 'pc' || !isDesktop) return previewOuterScrollRef.current;
         return previewInnerScrollRef.current;
     };
 
@@ -290,7 +403,7 @@ export default function App() {
     };
 
     const handlePreviewOuterScroll = () => {
-        if (previewDevice !== 'pc') return;
+        if (previewDevice !== 'pc' && isDesktop) return;
         const previewElement = previewOuterScrollRef.current;
         const editorElement = editorScrollRef.current;
         if (!previewElement || !editorElement) return;
@@ -298,7 +411,7 @@ export default function App() {
     };
 
     const handlePreviewInnerScroll = () => {
-        if (previewDevice === 'pc') return;
+        if (previewDevice === 'pc' || !isDesktop) return;
         const previewElement = previewInnerScrollRef.current;
         const editorElement = editorScrollRef.current;
         if (!previewElement || !editorElement) return;
@@ -320,12 +433,22 @@ export default function App() {
             });
             await navigator.clipboard.write([clipboardItem]);
 
-            showNotice('已复制到剪贴板', '现在可前往公众号编辑器粘贴', 'success');
+            showNotice('排版已复制', '可直接粘贴到公众号编辑器', 'success');
         } catch (err) {
             console.error('Copy failed', err);
             alert('复制格式失败，请检查浏览器剪贴板权限');
         } finally {
             setIsCopying(false);
+        }
+    };
+
+    const handleCopyMarkdown = async () => {
+        try {
+            await navigator.clipboard.writeText(markdownInput);
+            showNotice('Markdown 已复制', '原始 Markdown 源码已复制到剪贴板', 'success');
+        } catch (err) {
+            console.error('Copy Markdown failed', err);
+            showNotice('复制失败', '请检查浏览器剪贴板权限', 'error');
         }
     };
 
@@ -337,6 +460,18 @@ export default function App() {
             if (saved) showNotice('HTML 已导出', '文件已保存到指定位置', 'download');
         } catch (err) {
             console.error('HTML export failed', err);
+            showNotice('导出失败', '请稍后重试', 'error');
+        }
+    };
+
+    const handleExportMarkdown = async () => {
+        const blob = new Blob([markdownInput], { type: 'text/markdown;charset=utf-8' });
+        const filename = `Marka_Article_${Date.now()}.md`;
+        try {
+            const saved = await saveBlob(blob, filename, '.md', 'Markdown 文档');
+            if (saved) showNotice('Markdown 已导出', '文件已保存到指定位置', 'download');
+        } catch (err) {
+            console.error('Markdown export failed', err);
             showNotice('导出失败', '请稍后重试', 'error');
         }
     };
@@ -412,112 +547,196 @@ export default function App() {
 
     // 中轴线动态分栏：编辑区 fr / 分隔条 / 预览区 fr
     // 渲染时再次钳制到当前容器边界，防止状态未及时更新导致预览区被压缩到裁切
-    const safeRatio = clampRatio(splitRatio, ratioBounds);
+    // 容器宽度未就绪时直接使用保存值，避免初次渲染误钳制为默认值产生闪烁
+    const safeRatio = containerWidth > 0 ? clampRatio(splitRatio, ratioBounds) : splitRatio;
     const mainGridStyle: React.CSSProperties = {
         gridTemplateColumns: isDesktop
             ? `${safeRatio}fr 6px ${100 - safeRatio}fr`
             : '1fr',
     };
 
-    return (
+    const appContent = (
         <div className="flex flex-col h-screen overflow-hidden antialiased bg-[#fbfbfd] dark:bg-black transition-colors duration-300">
 
             <Header themeMode={themeMode} onToggleTheme={toggleTheme} />
 
-            {/* 移动端 Tab 切换 */}
-            <div className="md:hidden glass-toolbar flex items-center z-[90]">
-                <button
-                    data-testid="tab-editor"
-                    onClick={() => setActivePanel('editor')}
-                    className={`flex-1 flex items-center justify-center gap-2 py-3 text-[13px] font-semibold transition-colors border-b-2 ${activePanel === 'editor' ? 'text-[#0066cc] dark:text-[#0a84ff] border-[#0066cc] dark:border-[#0a84ff]' : 'text-[#86868b] dark:text-[#a1a1a6] border-transparent'}`}
-                >
-                    <PenLine size={15} />
-                    编辑
-                </button>
-                <button
-                    data-testid="tab-preview"
-                    onClick={() => setActivePanel('preview')}
-                    className={`flex-1 flex items-center justify-center gap-2 py-3 text-[13px] font-semibold transition-colors border-b-2 ${activePanel === 'preview' ? 'text-[#0066cc] dark:text-[#0a84ff] border-[#0066cc] dark:border-[#0a84ff]' : 'text-[#86868b] dark:text-[#a1a1a6] border-transparent'}`}
-                >
-                    <Eye size={15} />
-                    预览
-                </button>
+            {/* 移动端 Tab 切换 - 精致 segmented control */}
+            <div className="md:hidden flex items-stretch z-[90] px-3 py-1.5">
+                <div className="relative flex items-center w-full bg-black/[0.04] dark:bg-white/[0.07] rounded-lg p-0.5 border border-[#0000000c] dark:border-[#ffffff12]">
+                    <div
+                        className="absolute top-0.5 bottom-0.5 w-[calc(50%-4px)] bg-white dark:bg-[#3a3a3c] rounded-[5px] shadow-sm"
+                        style={{
+                            left: `calc(${tabIndicatorX * 50}% + 2px)`,
+                            transition: isSwiping ? 'none' : 'left 0.3s cubic-bezier(0.25, 0.1, 0.25, 1)',
+                        }}
+                    />
+                    <button
+                        data-testid="tab-editor"
+                        onClick={() => setActivePanel('editor')}
+                        className={`relative z-10 flex items-center justify-center gap-1 h-7 flex-1 rounded-[5px] text-[12px] font-medium transition-colors duration-200 ${activePanel === 'editor' ? 'text-[#1d1d1f] dark:text-white' : 'text-[#8e8e93] dark:text-[#8a8a8f]'}`}
+                    >
+                        <PenLine size={12} />
+                        编辑
+                    </button>
+                    <button
+                        data-testid="tab-preview"
+                        onClick={() => setActivePanel('preview')}
+                        className={`relative z-10 flex items-center justify-center gap-1 h-7 flex-1 rounded-[5px] text-[12px] font-medium transition-colors duration-200 ${activePanel === 'preview' ? 'text-[#1d1d1f] dark:text-white' : 'text-[#8e8e93] dark:text-[#8a8a8f]'}`}
+                    >
+                        <Eye size={12} />
+                        预览
+                    </button>
+                </div>
             </div>
 
-            {/* 排版设置 & 工具栏 (桌面端)：单行 flex，不再跟随中轴线分栏，避免极端比例下内容溢出 */}
+            {/* 桌面端工具栏 */}
             <div className="glass-toolbar hidden md:flex items-center justify-between gap-2 px-2 lg:px-4 z-[90]">
                 <ThemeSelector activeTheme={activeTheme} onThemeChange={setActiveTheme} />
-                <Toolbar
+                <DesktopToolbar
                     previewDevice={previewDevice}
                     onDeviceChange={setPreviewDevice}
                     onExportPdf={handleExportPdf}
                     onExportHtml={handleExportHtml}
+                    onExportMarkdown={handleExportMarkdown}
                     onCopy={handleCopy}
+                    onCopyMarkdown={handleCopyMarkdown}
                     isCopying={isCopying}
                     scrollSyncEnabled={scrollSyncEnabled}
                     onToggleScrollSync={() => setScrollSyncEnabled((prev) => !prev)}
                 />
             </div>
 
-            {/* 移动端工具栏：分两行避免按钮被主题栏挤出可视区 */}
-            <div className="md:hidden glass-toolbar z-[90]">
-                <div className="overflow-x-auto no-scrollbar border-b border-[#00000010] dark:border-[#ffffff10]">
-                    <ThemeSelector activeTheme={activeTheme} onThemeChange={setActiveTheme} />
+            {/* 移动端工具栏（仅预览Tab显示）：单行，模板按钮在左，操作按钮在右 */}
+            {activePanel === 'preview' && (
+                <div className="md:hidden glass-toolbar flex items-center justify-between px-2 py-1 z-[90] gap-1 overflow-x-auto no-scrollbar">
+                    <ThemeSelector activeTheme={activeTheme} onThemeChange={setActiveTheme} mobile />
+                    <MobileToolbar
+                        onExportPdf={handleExportPdf}
+                        onExportHtml={handleExportHtml}
+                        onExportMarkdown={handleExportMarkdown}
+                        onCopy={handleCopy}
+                        onCopyMarkdown={handleCopyMarkdown}
+                        isCopying={isCopying}
+                    />
                 </div>
-                <Toolbar
-                    previewDevice={previewDevice}
-                    onDeviceChange={setPreviewDevice}
-                    onExportPdf={handleExportPdf}
-                    onExportHtml={handleExportHtml}
-                    onCopy={handleCopy}
-                    isCopying={isCopying}
-                    scrollSyncEnabled={scrollSyncEnabled}
-                    onToggleScrollSync={() => setScrollSyncEnabled((prev) => !prev)}
-                />
-            </div>
+            )}
 
             {/* 编辑区 & 预览区 */}
             <main
                 ref={mainRef}
-                className={`flex-1 overflow-hidden grid grid-cols-1 relative ${isDraggingDivider ? '' : 'transition-all duration-500'}`}
-                style={mainGridStyle}
+                className={`flex-1 overflow-hidden relative ${isDesktop ? '' : ''}`}
             >
-                <div className={`${activePanel === 'editor' ? 'flex' : 'hidden'} md:flex flex-col overflow-hidden`}>
-                    <EditorPanel
-                        markdownInput={markdownInput}
-                        onInputChange={setMarkdownInput}
-                        editorScrollRef={editorScrollRef}
-                        onEditorScroll={handleEditorScroll}
-                        scrollSyncEnabled={scrollSyncEnabled}
-                    />
-                </div>
+                {/* 桌面端：左右分栏 */}
                 {isDesktop && (
-                    <Divider
-                        onPointerDown={handleDividerPointerDown}
-                        isDragging={isDraggingDivider}
-                        ratio={safeRatio}
-                        minRatio={ratioBounds.min}
-                        maxRatio={ratioBounds.max}
-                    />
+                    <div
+                        className={`w-full h-full grid ${isDraggingDivider ? '' : 'transition-all duration-500'}`}
+                        style={mainGridStyle}
+                    >
+                        <div className="flex flex-col overflow-hidden">
+                            <EditorPanel
+                                markdownInput={markdownInput}
+                                onInputChange={setMarkdownInput}
+                                editorScrollRef={editorScrollRef}
+                                onEditorScroll={handleEditorScroll}
+                                scrollSyncEnabled={scrollSyncEnabled}
+                            />
+                        </div>
+                        <Divider
+                            onPointerDown={handleDividerPointerDown}
+                            isDragging={isDraggingDivider}
+                            ratio={safeRatio}
+                            minRatio={ratioBounds.min}
+                            maxRatio={ratioBounds.max}
+                        />
+                        <div className="flex flex-col overflow-hidden">
+                            <PreviewPanel
+                                renderedHtml={renderedHtml}
+                                deviceWidthClass={deviceWidthClass()}
+                                previewDevice={previewDevice}
+                                previewRef={previewRef}
+                                previewOuterScrollRef={previewOuterScrollRef}
+                                previewInnerScrollRef={previewInnerScrollRef}
+                                onPreviewOuterScroll={handlePreviewOuterScroll}
+                                onPreviewInnerScroll={handlePreviewInnerScroll}
+                                scrollSyncEnabled={scrollSyncEnabled}
+                                onImageClick={handleImageClick}
+                                isMobileView={false}
+                            />
+                        </div>
+                    </div>
                 )}
-                <div className={`${activePanel === 'preview' ? 'flex' : 'hidden'} md:flex flex-col overflow-hidden`}>
-                    <PreviewPanel
-                        renderedHtml={renderedHtml}
-                        deviceWidthClass={deviceWidthClass()}
-                        previewDevice={previewDevice}
-                        previewRef={previewRef}
-                        previewOuterScrollRef={previewOuterScrollRef}
-                        previewInnerScrollRef={previewInnerScrollRef}
-                        onPreviewOuterScroll={handlePreviewOuterScroll}
-                        onPreviewInnerScroll={handlePreviewInnerScroll}
-                        scrollSyncEnabled={scrollSyncEnabled}
-                        onImageClick={handleImageClick}
-                    />
-                </div>
+
+                {/* 移动端：左右滑动切换 */}
+                {!isDesktop && (
+                    <div
+                        className="w-[200%] h-full flex flex-nowrap"
+                        onTouchStart={handleTouchStart}
+                        onTouchMove={handleTouchMove}
+                        onTouchEnd={handleTouchEnd}
+                        style={{
+                            transform: `translateX(calc(${activePanel === 'editor' ? '0%' : '-50%'} + ${swipeDx}px))`,
+                            transition: isSwiping ? 'none' : 'transform 0.3s cubic-bezier(0.25, 0.1, 0.25, 1)',
+                            touchAction: 'pan-y',
+                        }}
+                    >
+                        <div className="w-1/2 h-full flex-shrink-0 flex flex-col overflow-hidden">
+                            <EditorPanel
+                                markdownInput={markdownInput}
+                                onInputChange={setMarkdownInput}
+                                editorScrollRef={editorScrollRef}
+                                onEditorScroll={handleEditorScroll}
+                                scrollSyncEnabled={scrollSyncEnabled}
+                            />
+                        </div>
+                        <div className="w-1/2 h-full flex-shrink-0 flex flex-col overflow-hidden">
+                            <PreviewPanel
+                                renderedHtml={renderedHtml}
+                                deviceWidthClass={deviceWidthClass()}
+                                previewDevice={previewDevice}
+                                previewRef={previewRef}
+                                previewOuterScrollRef={previewOuterScrollRef}
+                                previewInnerScrollRef={previewInnerScrollRef}
+                                onPreviewOuterScroll={handlePreviewOuterScroll}
+                                onPreviewInnerScroll={handlePreviewInnerScroll}
+                                scrollSyncEnabled={scrollSyncEnabled}
+                                onImageClick={handleImageClick}
+                                isMobileView={true}
+                            />
+                        </div>
+                    </div>
+                )}
             </main>
 
             <CopyToast notice={notice} onClose={() => setNotice(null)} />
 
         </div>
     );
+
+    if (forceMobile) {
+        const embedUrl = new URL(window.location.href);
+        embedUrl.searchParams.delete('mobile');
+        embedUrl.searchParams.set('embed', '1');
+        return (
+            <div className="fixed inset-0 bg-[#1d1d1f] flex items-center justify-center overflow-hidden">
+                <div
+                    className="relative bg-black rounded-[44px] shadow-2xl flex-shrink-0"
+                    style={{ width: 390, height: 844, padding: 8 }}
+                >
+                    <div className="absolute top-2 left-1/2 -translate-x-1/2 w-28 h-7 bg-black rounded-b-2xl z-50" />
+                    <div
+                        className="w-full h-full rounded-[36px] overflow-hidden"
+                        style={{ background: '#fbfbfd' }}
+                    >
+                        <iframe
+                            src={embedUrl.toString()}
+                            className="block w-full h-full border-none"
+                            style={{ background: '#fbfbfd' }}
+                        />
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    return appContent;
 }

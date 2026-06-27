@@ -3,8 +3,59 @@
 @tailwind utilities;
 
 @layer base {
+    html {
+        -webkit-text-size-adjust: 100%;
+        -webkit-tap-highlight-color: transparent;
+        height: 100%;
+    }
     body {
-        @apply antialiased text-[#1d1d1f] bg-[#fbfbfd] dark:text-[#f5f5f7] dark:bg-black transition-colors duration-300;
+        @apply antialiased text-[#1d1d1f] bg-[#fbfbfd] dark:text-[#f5f5f7] dark:bg-black;
+        touch-action: manipulation;
+        overscroll-behavior-y: none;
+        height: 100%;
+        overflow: hidden;
+        -webkit-user-select: none;
+        user-select: none;
+    }
+    button {
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+        -webkit-touch-callout: none;
+        -webkit-user-select: none;
+        user-select: none;
+    }
+    textarea {
+        -webkit-user-select: text !important;
+        user-select: text !important;
+        touch-action: pan-y;
+    }
+    .preview-content {
+        -webkit-user-select: text;
+        user-select: text;
+    }
+    input, textarea {
+        -webkit-appearance: none;
+        -webkit-tap-highlight-color: transparent;
+    }
+    * {
+        -webkit-tap-highlight-color: transparent;
+    }
+    #root {
+        height: 100%;
+        overflow: hidden;
+    }
+}
+
+@layer utilities {
+    .scroll-touch {
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior: contain;
+        touch-action: pan-y;
+    }
+    .touch-manipulation {
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+        -webkit-touch-callout: none;
     }
 }
 

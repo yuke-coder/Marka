@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { Moon, Sun } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -6,7 +7,32 @@ interface HeaderProps {
     onToggleTheme: () => void;
 }
 
+function formatDateTime(date: Date) {
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    const y = date.getFullYear();
+    const m = pad(date.getMonth() + 1);
+    const d = pad(date.getDate());
+    const h = pad(date.getHours());
+    const min = pad(date.getMinutes());
+    const s = pad(date.getSeconds());
+    const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+    const w = weekdays[date.getDay()];
+    return {
+        date: `${y}-${m}-${d} ${w}`,
+        time: `${h}:${min}:${s}`,
+    };
+}
+
 export default function Header({ themeMode, onToggleTheme }: HeaderProps) {
+    const [now, setNow] = useState(new Date());
+
+    useEffect(() => {
+        const timer = setInterval(() => setNow(new Date()), 1000);
+        return () => clearInterval(timer);
+    }, []);
+
+    const { date, time } = formatDateTime(now);
+
     return (
         <header className="glass flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 sticky top-0 z-[100]">
             <div className="flex items-center gap-3">
@@ -20,7 +46,12 @@ export default function Header({ themeMode, onToggleTheme }: HeaderProps) {
                 <span className="font-bold text-lg tracking-tight text-black dark:text-white">Marka<span className="hidden sm:inline"> - 排版君</span></span>
             </div>
 
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3">
+                <div className="hidden sm:flex items-center gap-2 text-black/50 dark:text-white/50 tabular-nums">
+                    <span className="hidden lg:inline text-xs">{date}</span>
+                    <span className="text-xs font-mono font-medium text-black/70 dark:text-white/70">{time}</span>
+                </div>
+                <div className="w-px h-4 bg-black/10 dark:bg-white/10 hidden sm:block" />
                 <motion.button
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}

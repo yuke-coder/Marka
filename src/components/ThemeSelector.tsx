@@ -1,21 +1,21 @@
 import { useState, useRef, useEffect } from 'react';
-import { ChevronDown, Check, X } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { ChevronDown, Check, X, Palette } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { THEMES, THEME_GROUPS, type Theme } from '../lib/themes';
 
 interface ThemeSelectorProps {
     activeTheme: string;
     onThemeChange: (themeId: string) => void;
+    mobile?: boolean;
 }
 
-/** Extract a css property value from an inline style string */
 function extractStyle(styleStr: string, prop: string): string | null {
     const regex = new RegExp(`${prop}\\s*:\\s*([^;!]+)`, 'i');
     const match = styleStr.match(regex);
     return match ? match[1].trim() : null;
 }
 
-/** Build a mini color swatch from theme styles */
 function ThemeSwatch({ styles }: { styles: Record<string, string> }) {
     const bg = extractStyle(styles.container || '', 'background-color') || '#fff';
     const textColor = extractStyle(styles.p || '', 'color') || '#333';
@@ -23,7 +23,7 @@ function ThemeSwatch({ styles }: { styles: Record<string, string> }) {
     const accentColor = extractStyle(styles.a || styles.blockquote || '', 'color') || h1Color;
 
     return (
-        <div className="flex gap-0.5 h-5 rounded-md overflow-hidden border border-[#00000015] dark:border-[#ffffff15]" style={{ width: '48px' }}>
+        <div className="flex gap-[2px] h-4 rounded overflow-hidden border border-[#00000015] dark:border-[#ffffff15]" style={{ width: '40px' }}>
             <div className="flex-1" style={{ backgroundColor: bg }} />
             <div className="flex-1" style={{ backgroundColor: h1Color }} />
             <div className="flex-1" style={{ backgroundColor: accentColor }} />
@@ -32,11 +32,27 @@ function ThemeSwatch({ styles }: { styles: Record<string, string> }) {
     );
 }
 
-export default function ThemeSelector({ activeTheme, onThemeChange }: ThemeSelectorProps) {
-    const [isThemeOpen, setIsThemeOpen] = useState(false);
+const tbH = 'inline-flex items-center justify-center h-7 rounded-md text-[12px] font-medium transition-all duration-150 border select-none shrink-0 whitespace-nowrap';
+const idleStyle = 'border-[#00000010] dark:border-[#ffffff16] text-[#5e5e63] dark:text-[#98989d] bg-transparent hover:border-[#00000025] dark:hover:border-[#ffffff28] hover:text-[#1d1d1f] dark:hover:text-[#f5f5f7] hover:bg-black/[0.03] dark:hover:bg-white/[0.05] active:scale-[0.96]';
+
+const segWrap = 'inline-flex items-center p-0.5 rounded-lg bg-black/[0.035] dark:bg-white/[0.055] border border-[#0000000c] dark:border-[#ffffff12] shrink-0 max-w-full overflow-x-auto no-scrollbar';
+const pillBtn = 'inline-flex items-center justify-center h-6 px-3 rounded-[5px] text-[12px] font-medium transition-all duration-200 select-none whitespace-nowrap';
+const pillOn = 'bg-white dark:bg-[#2c2c2e] text-[#1d1d1f] dark:text-[#f5f5f7] shadow-[0_1px_2px_rgba(0,0,0,0.07)] dark:shadow-[0_1px_2px_rgba(0,0,0,0.4)]';
+const pillOff = 'text-[#8e8e93] dark:text-[#8a8a8f] hover:text-[#1d1d1f] dark:hover:text-[#f5f5f7] hover:bg-black/[0.04] dark:hover:bg-white/[0.06] active:scale-95';
+
+function MobileThemeModal({
+    isOpen,
+    onClose,
+    activeTheme,
+    onThemeChange,
+}: {
+    isOpen: boolean;
+    onClose: () => void;
+    activeTheme: string;
+    onThemeChange: (id: string) => void;
+}) {
     const [showBottomFade, setShowBottomFade] = useState(true);
     const scrollRef = useRef<HTMLDivElement>(null);
-    const selectedThemeName = THEMES.find(t => t.id === activeTheme)?.name;
 
     const handleScroll = () => {
         if (!scrollRef.current) return;
@@ -45,12 +61,261 @@ export default function ThemeSelector({ activeTheme, onThemeChange }: ThemeSelec
     };
 
     useEffect(() => {
-        if (isThemeOpen && scrollRef.current) {
+        if (isOpen && scrollRef.current) {
             handleScroll();
         }
-    }, [isThemeOpen]);
+    }, [isOpen]);
 
-    // Keep top quick-switch pills fixed for best discoverability.
+    const modal = (
+        <AnimatePresence>
+        {isOpen && (
+            <>
+                <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="fixed inset-0 z-[95] bg-black/20 dark:bg-black/40"
+                    onClick={onClose}
+                />
+                <motion.div
+                    initial={{ opacity: 0, y: '100%' }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: '100%' }}
+                    transition={{ duration: 0.28, ease: [0.25, 0.1, 0.25, 1] }}
+                    className="fixed left-0 right-0 bottom-0 z-[96] bg-white dark:bg-[#1c1c1e] rounded-t-2xl overflow-hidden"
+                    style={{ maxHeight: '80vh', WebkitOverflowScrolling: 'touch' }}
+                >
+                    <div className="flex items-center justify-between px-4 pt-4 pb-2">
+                        <span className="text-[15px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7]">选择模板 · {THEMES.length} 款</span>
+                        <button
+                            onClick={onClose}
+                            className="p-1 rounded-full hover:bg-[#00000008] dark:hover:bg-[#ffffff10] active:bg-[#00000012] dark:active:bg-[#ffffff18] transition-colors touch-manipulation"
+                        >
+                            <X size={18} className="text-[#86868b]" />
+                        </button>
+                    </div>
+                    <div
+                        ref={scrollRef}
+                        onScroll={handleScroll}
+                        className="overflow-y-auto px-4 pb-6 overscroll-contain"
+                        style={{ maxHeight: 'calc(80vh - 52px)', WebkitOverflowScrolling: 'touch', touchAction: 'pan-y' }}
+                    >
+                        {THEME_GROUPS.map((group, groupIdx) => (
+                            <div key={group.label}>
+                                <div className={`flex items-center gap-2 ${groupIdx > 0 ? 'mt-4 pt-4 border-t border-[#00000010] dark:border-[#ffffff10]' : 'mt-1'}`}>
+                                    <span className="text-[12px] font-semibold text-[#86868b] dark:text-[#a1a1a6] uppercase tracking-widest">{group.label}</span>
+                                    <span className="text-[11px] text-[#b0b0b5] dark:text-[#666]">{group.themes.length} 款</span>
+                                </div>
+                                <div className="grid grid-cols-2 gap-2 mt-2">
+                                    {group.themes.map(theme => (
+                                        <button
+                                            key={theme.id}
+                                            onClick={() => {
+                                                onThemeChange(theme.id);
+                                                onClose();
+                                            }}
+                                            className={`relative flex flex-col items-start gap-1.5 p-3 rounded-xl text-left transition-colors touch-manipulation
+                                                    ${activeTheme === theme.id
+                                                    ? 'bg-[#0066cc]/8 dark:bg-[#0a84ff]/10 ring-2 ring-[#0066cc] dark:ring-[#0a84ff]'
+                                                    : 'bg-[#f5f5f7] dark:bg-[#2c2c2e] active:bg-[#ebebed] dark:active:bg-[#3a3a3c]'
+                                                }`}
+                                        >
+                                            <div className="flex items-center justify-between w-full">
+                                                <ThemeSwatch styles={theme.styles} />
+                                                {activeTheme === theme.id && <Check size={14} className="text-[#0066cc] dark:text-[#0a84ff]" />}
+                                            </div>
+                                            <span className="text-[13px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7] leading-tight">{theme.name}</span>
+                                            <span className="text-[11px] text-[#86868b] dark:text-[#a1a1a6] leading-snug line-clamp-2">{theme.description}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                    <div
+                        className={`pointer-events-none absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-white dark:from-[#1c1c1e] to-transparent transition-opacity duration-200 ${showBottomFade ? 'opacity-100' : 'opacity-0'}`}
+                    />
+                </motion.div>
+            </>
+        )}
+        </AnimatePresence>
+    );
+
+    return createPortal(modal, document.body);
+}
+
+function DesktopThemeDropdown({
+    isOpen,
+    onClose,
+    activeTheme,
+    onThemeChange,
+    buttonRef,
+}: {
+    isOpen: boolean;
+    onClose: () => void;
+    activeTheme: string;
+    onThemeChange: (id: string) => void;
+    buttonRef: React.RefObject<HTMLButtonElement | null>;
+}) {
+    const [showBottomFade, setShowBottomFade] = useState(true);
+    const [position, setPosition] = useState({ top: 0, left: 0 });
+    const scrollRef = useRef<HTMLDivElement>(null);
+    const panelRef = useRef<HTMLDivElement>(null);
+
+    const handleScroll = () => {
+        if (!scrollRef.current) return;
+        const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
+        setShowBottomFade(scrollHeight - scrollTop - clientHeight > 20);
+    };
+
+    useEffect(() => {
+        if (isOpen && scrollRef.current) {
+            handleScroll();
+        }
+    }, [isOpen]);
+
+    useEffect(() => {
+        if (isOpen && buttonRef.current) {
+            const updatePosition = () => {
+                const rect = buttonRef.current!.getBoundingClientRect();
+                setPosition({ top: rect.bottom + 6, left: rect.left });
+            };
+            updatePosition();
+            window.addEventListener('scroll', updatePosition, true);
+            window.addEventListener('resize', updatePosition);
+            return () => {
+                window.removeEventListener('scroll', updatePosition, true);
+                window.removeEventListener('resize', updatePosition);
+            };
+        }
+    }, [isOpen, buttonRef]);
+
+    useEffect(() => {
+        if (!isOpen) return;
+        const handleClickOutside = (e: MouseEvent) => {
+            if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+                onClose();
+            }
+        };
+        const handleEscape = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') onClose();
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        document.addEventListener('keydown', handleEscape);
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside);
+            document.removeEventListener('keydown', handleEscape);
+        };
+    }, [isOpen, onClose]);
+
+    const panel = (
+        <AnimatePresence>
+        {isOpen && (
+            <motion.div
+                ref={panelRef}
+                initial={{ opacity: 0, scale: 0.96, y: -4 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.96, y: -4 }}
+                transition={{ duration: 0.18, ease: [0.25, 0.1, 0.25, 1] }}
+                className="fixed z-[96] w-[580px] md:w-[640px] bg-white dark:bg-[#1c1c1e] rounded-2xl shadow-apple-lg border border-[#00000015] dark:border-[#ffffff15] overflow-hidden"
+                style={{
+                    top: position.top,
+                    left: position.left,
+                    maxHeight: 'min(70vh, 560px)',
+                    transformOrigin: 'top left',
+                }}
+            >
+                <div className="flex items-center justify-between px-5 pt-4 pb-2">
+                    <span className="text-[15px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7]">选择排版风格 · {THEMES.length} 款</span>
+                    <button
+                        onClick={onClose}
+                        className="p-1 rounded-full hover:bg-[#00000008] dark:hover:bg-[#ffffff10] active:bg-[#00000012] dark:active:bg-[#ffffff18] transition-colors"
+                    >
+                        <X size={16} className="text-[#86868b]" />
+                    </button>
+                </div>
+
+                <div
+                    ref={scrollRef}
+                    onScroll={handleScroll}
+                    className="overflow-y-auto px-5 pb-5"
+                    style={{ maxHeight: 'min(calc(70vh - 56px), 504px)', WebkitOverflowScrolling: 'touch' }}
+                >
+                    {THEME_GROUPS.map((group, groupIdx) => (
+                        <div key={group.label}>
+                            <div className={`flex items-center gap-2 ${groupIdx > 0 ? 'mt-4 pt-4 border-t border-[#00000010] dark:border-[#ffffff10]' : 'mt-1'}`}>
+                                <span className="text-[12px] font-semibold text-[#86868b] dark:text-[#a1a1a6] uppercase tracking-widest">{group.label}</span>
+                                <span className="text-[11px] text-[#b0b0b5] dark:text-[#666]">{group.themes.length} 款</span>
+                            </div>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-2">
+                                {group.themes.map(theme => (
+                                    <button
+                                        key={theme.id}
+                                        onClick={() => {
+                                            onThemeChange(theme.id);
+                                            onClose();
+                                        }}
+                                        className={`relative flex flex-col items-start gap-1.5 p-3 rounded-xl text-left transition-all
+                                                ${activeTheme === theme.id
+                                                ? 'bg-[#0066cc]/8 dark:bg-[#0a84ff]/10 ring-2 ring-[#0066cc] dark:ring-[#0a84ff]'
+                                                : 'bg-[#f5f5f7] dark:bg-[#2c2c2e] hover:bg-[#ebebed] dark:hover:bg-[#3a3a3c] active:bg-[#ebebed] dark:active:bg-[#3a3a3c]'
+                                            }`}
+                                    >
+                                        <div className="flex items-center justify-between w-full">
+                                            <ThemeSwatch styles={theme.styles} />
+                                            {activeTheme === theme.id && <Check size={14} className="text-[#0066cc] dark:text-[#0a84ff]" />}
+                                        </div>
+                                        <span className="text-[13px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7] leading-tight">{theme.name}</span>
+                                        <span className="text-[11px] text-[#86868b] dark:text-[#a1a1a6] leading-snug line-clamp-2">{theme.description}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+
+                <div
+                    className={`pointer-events-none absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-white dark:from-[#1c1c1e] to-transparent transition-opacity duration-200 rounded-b-2xl ${showBottomFade ? 'opacity-100' : 'opacity-0'}`}
+                />
+            </motion.div>
+        )}
+        </AnimatePresence>
+    );
+
+    return createPortal(panel, document.body);
+}
+
+export default function ThemeSelector({ activeTheme, onThemeChange, mobile }: ThemeSelectorProps) {
+    const [isThemeOpen, setIsThemeOpen] = useState(false);
+    const buttonRef = useRef<HTMLButtonElement>(null);
+    const selectedThemeName = THEMES.find(t => t.id === activeTheme)?.name;
+
+    if (mobile) {
+        const currentThemeShort = selectedThemeName
+            ? selectedThemeName.split(/[\s·]/)[0]
+            : '模板';
+
+        return (
+            <>
+            <div className="relative shrink-0">
+                <button
+                    onClick={() => setIsThemeOpen(true)}
+                    className="inline-flex items-center gap-1 h-8 px-2.5 rounded-lg text-[12px] font-medium transition-colors duration-100 border select-none shrink-0 border-[#00000010] dark:border-[#ffffff16] text-[#5e5e63] dark:text-[#98989d] bg-transparent active:bg-black/[0.06] dark:active:bg-white/[0.08] touch-manipulation active:scale-95"
+                >
+                    <Palette size={13} />
+                    <span className="max-w-[60px] truncate">{currentThemeShort}</span>
+                </button>
+            </div>
+            <MobileThemeModal
+                isOpen={isThemeOpen}
+                onClose={() => setIsThemeOpen(false)}
+                activeTheme={activeTheme}
+                onThemeChange={onThemeChange}
+            />
+            </>
+        );
+    }
+
     const pillThemeIds = ['apple', 'claude', 'wechat', 'sspai'];
     const pillThemes: Theme[] = pillThemeIds
         .map(id => THEMES.find(theme => theme.id === id))
@@ -58,18 +323,13 @@ export default function ThemeSelector({ activeTheme, onThemeChange }: ThemeSelec
     const isInDropdown = !pillThemes.some(theme => theme.id === activeTheme);
 
     return (
-        <div className="flex items-center gap-2 lg:gap-3 px-2 lg:px-4 py-3 min-w-0 shrink">
-            <span className="text-[12px] font-semibold text-[#86868b] uppercase tracking-widest hidden 2xl:block shrink-0">排版风格</span>
-
-            <div className="flex items-center gap-1.5 bg-[#00000008] dark:bg-[#ffffff10] p-1 rounded-full backdrop-blur-md shrink-0 max-w-full overflow-x-auto no-scrollbar">
+        <div className="flex items-center gap-2 px-3 lg:px-4 py-2 min-w-0 shrink-0">
+            <div className={segWrap} role="group" aria-label="排版风格">
                 {pillThemes.map(theme => (
                     <button
                         key={theme.id}
                         onClick={() => onThemeChange(theme.id)}
-                        className={`px-3 lg:px-4 py-1.5 rounded-full text-[13px] font-medium transition-all whitespace-nowrap ${activeTheme === theme.id
-                            ? 'bg-white dark:bg-[#2c2c2e] text-[#1d1d1f] dark:text-[#f5f5f7] shadow-sm'
-                            : 'text-[#86868b] hover:text-[#1d1d1f] dark:text-[#a1a1a6] dark:hover:text-[#f5f5f7]'
-                            }`}
+                        className={`${pillBtn} ${activeTheme === theme.id ? pillOn : pillOff}`}
                     >
                         {theme.name.split(' ')[0]}
                     </button>
@@ -78,99 +338,31 @@ export default function ThemeSelector({ activeTheme, onThemeChange }: ThemeSelec
 
             <div className="relative shrink-0">
                 <button
+                    ref={buttonRef}
                     onClick={() => setIsThemeOpen(!isThemeOpen)}
-                    className={`apple-export-btn flex items-center gap-2 !px-3 lg:!px-4 !py-1.5 !text-[13px] transition-all whitespace-nowrap ${isInDropdown ? 'bg-white dark:bg-[#2c2c2e] text-[#1d1d1f] dark:text-[#f5f5f7] border-[#00000010] dark:border-[#ffffff10] shadow-sm' : 'border-transparent bg-transparent hover:bg-transparent dark:bg-transparent text-[#86868b] dark:text-[#a1a1a6] shadow-none hover:text-[#1d1d1f] dark:hover:text-[#f5f5f7]'}`}
+                    className={`${tbH} gap-1 px-2.5 ${isInDropdown
+                        ? 'border-[#0066cc]/35 dark:border-[#0a84ff]/35 text-[#0066cc] dark:text-[#0a84ff] bg-[#0066cc]/7 dark:bg-[#0a84ff]/10'
+                        : idleStyle
+                        }`}
                 >
-                    {isInDropdown ? selectedThemeName : `全部 ${THEMES.length} 款`}
-                    <ChevronDown size={14} className={`transition-transform duration-300 ${isThemeOpen ? 'rotate-180' : ''}`} />
+                    <span className="hidden sm:inline">{isInDropdown ? selectedThemeName : `全部 ${THEMES.length} 款`}</span>
+                    <span className="sm:hidden">全部</span>
+                    <ChevronDown size={12} className={`transition-transform duration-300 ${isThemeOpen ? 'rotate-180' : ''}`} />
                 </button>
 
-                <AnimatePresence>
-                    {isThemeOpen && (
-                        <>
-                            {/* Backdrop */}
-                            <motion.div
-                                initial={{ opacity: 0 }}
-                                animate={{ opacity: 1 }}
-                                exit={{ opacity: 0 }}
-                                className="fixed inset-0 z-40 bg-black/10 dark:bg-black/30"
-                                onClick={() => setIsThemeOpen(false)}
-                            />
-                            {/* Grid panel */}
-                            <motion.div
-                                initial={{ opacity: 0, scale: 0.96, y: 10 }}
-                                animate={{ opacity: 1, scale: 1, y: 0 }}
-                                exit={{ opacity: 0, scale: 0.96, y: 10 }}
-                                transition={{ duration: 0.25, ease: [0.25, 0.1, 0.25, 1] }}
-                                className="fixed left-4 right-4 sm:absolute sm:left-0 sm:right-auto top-auto sm:top-12 w-auto sm:w-[580px] md:w-[680px] bg-white dark:bg-[#1c1c1e] rounded-2xl shadow-apple-lg border border-[#00000015] dark:border-[#ffffff15] z-50 overflow-hidden"
-                                style={{ maxHeight: 'min(70vh, 600px)' }}
-                            >
-                                {/* Header */}
-                                <div className="flex items-center justify-between px-5 pt-4 pb-2">
-                                    <span className="text-[15px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7]">选择排版风格 · {THEMES.length} 款</span>
-                                    <button
-                                        onClick={() => setIsThemeOpen(false)}
-                                        className="p-1 rounded-full hover:bg-[#00000008] dark:hover:bg-[#ffffff10] transition-colors"
-                                    >
-                                        <X size={16} className="text-[#86868b]" />
-                                    </button>
-                                </div>
-
-                                {/* Scrollable grid */}
-                                <div
-                                    ref={scrollRef}
-                                    onScroll={handleScroll}
-                                    className="overflow-y-auto px-5 pb-5"
-                                    style={{ maxHeight: 'min(calc(70vh - 56px), 544px)' }}
-                                >
-                                    {THEME_GROUPS.map((group, groupIdx) => (
-                                        <div key={group.label}>
-                                            <div className={`flex items-center gap-2 ${groupIdx > 0 ? 'mt-4 pt-4 border-t border-[#00000010] dark:border-[#ffffff10]' : 'mt-1'}`}>
-                                                <span className="text-[12px] font-semibold text-[#86868b] dark:text-[#a1a1a6] uppercase tracking-widest">{group.label}</span>
-                                                <span className="text-[11px] text-[#b0b0b5] dark:text-[#666]">{group.themes.length} 款</span>
-                                            </div>
-                                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-2">
-                                                {group.themes.map(theme => (
-                                                    <button
-                                                        key={theme.id}
-                                                        onClick={() => {
-                                                            onThemeChange(theme.id);
-                                                            setIsThemeOpen(false);
-                                                        }}
-                                                        className={`relative flex flex-col items-start gap-1.5 p-3 rounded-xl text-left transition-all
-                                                            ${activeTheme === theme.id
-                                                                ? 'bg-[#0066cc]/8 dark:bg-[#0a84ff]/10 ring-2 ring-[#0066cc] dark:ring-[#0a84ff]'
-                                                                : 'bg-[#f5f5f7] dark:bg-[#2c2c2e] hover:bg-[#ebebed] dark:hover:bg-[#3a3a3c]'
-                                                            }`}
-                                                    >
-                                                        <div className="flex items-center justify-between w-full">
-                                                            <ThemeSwatch styles={theme.styles} />
-                                                            {activeTheme === theme.id && <Check size={14} className="text-[#0066cc] dark:text-[#0a84ff]" />}
-                                                        </div>
-                                                        <span className="text-[13px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7] leading-tight">{theme.name}</span>
-                                                        <span className="text-[11px] text-[#86868b] dark:text-[#a1a1a6] leading-snug line-clamp-2">{theme.description}</span>
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-
-                                {/* Bottom fade scroll hint */}
-                                <div
-                                    className={`pointer-events-none absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-white dark:from-[#1c1c1e] to-transparent transition-opacity duration-200 rounded-b-2xl ${showBottomFade ? 'opacity-100' : 'opacity-0'}`}
-                                />
-                            </motion.div>
-                        </>
-                    )}
-                </AnimatePresence>
+                <DesktopThemeDropdown
+                    isOpen={isThemeOpen}
+                    onClose={() => setIsThemeOpen(false)}
+                    activeTheme={activeTheme}
+                    onThemeChange={onThemeChange}
+                    buttonRef={buttonRef}
+                />
             </div>
 
-            {/* Theme description next to selectors */}
-            <div className="hidden 2xl:flex items-center ml-2 pl-3 border-l border-[#00000015] dark:border-[#ffffff15] min-w-0">
-                <p className="text-[13px] text-[#86868b] dark:text-[#a1a1a6] font-medium tracking-wide truncate max-w-[300px] 2xl:max-w-[450px]">
-                    <span className="text-[#1d1d1f] dark:text-[#f5f5f7] font-semibold mr-1">{THEMES.find(t => t.id === activeTheme)?.name}：</span>
-                    {THEMES.find(t => t.id === activeTheme)?.description}
+            <div className="hidden 2xl:flex items-center ml-1 pl-3 border-l border-[#00000010] dark:border-[#ffffff12] min-w-0">
+                <p className="text-[12px] text-[#86868b] dark:text-[#8a8a8f] font-medium tracking-wide truncate max-w-[360px]">
+                    <span className="text-[#1d1d1f] dark:text-[#f5f5f7] font-semibold mr-1">{THEMES.find(t => t.id === activeTheme)?.name}</span>
+                    <span className="text-[#8e8e93] dark:text-[#6c6c70]">{THEMES.find(t => t.id === activeTheme)?.description}</span>
                 </p>
             </div>
         </div>

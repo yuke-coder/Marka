@@ -12,6 +12,7 @@ interface PreviewPanelProps {
     onPreviewInnerScroll: () => void;
     scrollSyncEnabled: boolean;
     onImageClick?: (info: { type: string; index: number; src?: string; alt?: string }) => void;
+    isMobileView?: boolean;
 }
 
 export default function PreviewPanel({
@@ -24,9 +25,10 @@ export default function PreviewPanel({
     onPreviewOuterScroll,
     onPreviewInnerScroll,
     scrollSyncEnabled,
-    onImageClick
+    onImageClick,
+    isMobileView
 }: PreviewPanelProps) {
-    const isFramedDevice = previewDevice !== 'pc';
+    const isFramedDevice = previewDevice !== 'pc' && !isMobileView;
     const containerRef = useRef<HTMLDivElement>(null);
     const contentRef = useRef<HTMLDivElement>(null);
 
@@ -120,37 +122,46 @@ export default function PreviewPanel({
         <div
             ref={previewOuterScrollRef}
             data-testid="preview-outer-scroll"
-            onScroll={scrollSyncEnabled && !isFramedDevice ? onPreviewOuterScroll : undefined}
-            className="relative overflow-y-auto no-scrollbar bg-[#f2f2f7]/50 dark:bg-[#000000] flex flex-col z-20 flex-1 min-h-0 w-full overflow-x-hidden"
+            onScroll={scrollSyncEnabled && (isMobileView || !isFramedDevice) ? onPreviewOuterScroll : undefined}
+            className={`relative overflow-y-auto no-scrollbar flex flex-col z-20 flex-1 min-h-0 w-full overflow-x-hidden scroll-touch ${isMobileView ? 'bg-white dark:bg-[#1c1c1e]' : 'bg-[#f2f2f7]/50 dark:bg-[#000000]'}`}
         >
-            <div
-                ref={containerRef}
-                className={`${deviceWidthClass} transition-all duration-500 ${isFramedDevice ? 'self-center my-12 px-4 lg:px-8' : 'mt-12 mb-32 ml-4 md:ml-6 mr-auto'} h-fit min-h-[calc(100%-48px)] flex items-start justify-center relative`}
-            >
-                {isFramedDevice ? (
-                    <DeviceFrame
-                        device={previewDevice as 'mobile' | 'tablet'}
-                        scrollRef={previewInnerScrollRef}
-                        onScroll={scrollSyncEnabled ? onPreviewInnerScroll : undefined}
-                    >
-                        <div
-                            ref={contentRef}
-                            data-testid="preview-content"
-                            dangerouslySetInnerHTML={{ __html: renderedHtml }}
-                            className={`preview-content min-w-full ${previewDevice === 'mobile' ? 'px-1 pt-1 pb-8' : 'px-2 pt-2 pb-10'}`}
-                        />
-                    </DeviceFrame>
-                ) : (
-                    <div className="bg-white rounded-[24px] overflow-hidden shadow-apple-lg transition-all duration-500 ring-1 ring-[#00000008] border-t border-white/50 w-full">
-                        <div
-                            ref={contentRef}
-                            data-testid="preview-content"
-                            dangerouslySetInnerHTML={{ __html: renderedHtml }}
-                            className="preview-content min-w-full"
-                        />
-                    </div>
-                )}
-            </div>
+            {isMobileView ? (
+                <div
+                    ref={contentRef}
+                    data-testid="preview-content"
+                    dangerouslySetInnerHTML={{ __html: renderedHtml }}
+                    className="preview-content w-full px-3 py-2 flex-1"
+                />
+            ) : (
+                <div
+                    ref={containerRef}
+                    className={`${deviceWidthClass} transition-all duration-500 ${isFramedDevice ? 'self-center my-12 px-4 lg:px-8' : 'mt-12 mb-32 ml-4 md:ml-6 mr-auto'} h-fit min-h-[calc(100%-48px)] flex items-start justify-center relative`}
+                >
+                    {isFramedDevice ? (
+                        <DeviceFrame
+                            device={previewDevice as 'mobile' | 'tablet'}
+                            scrollRef={previewInnerScrollRef}
+                            onScroll={scrollSyncEnabled ? onPreviewInnerScroll : undefined}
+                        >
+                            <div
+                                ref={contentRef}
+                                data-testid="preview-content"
+                                dangerouslySetInnerHTML={{ __html: renderedHtml }}
+                                className={`preview-content min-w-full ${previewDevice === 'mobile' ? 'px-1 pt-1 pb-8' : 'px-2 pt-2 pb-10'}`}
+                            />
+                        </DeviceFrame>
+                    ) : (
+                        <div className="bg-white rounded-[24px] overflow-hidden shadow-apple-lg transition-all duration-500 ring-1 ring-[#00000008] border-t border-white/50 w-full">
+                            <div
+                                ref={contentRef}
+                                data-testid="preview-content"
+                                dangerouslySetInnerHTML={{ __html: renderedHtml }}
+                                className="preview-content min-w-full"
+                            />
+                        </div>
+                    )}
+                </div>
+            )}
         </div>
     );
 }
