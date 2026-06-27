@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Moon, Sun } from 'lucide-react';
+import { Moon, Sparkles, Sun } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 interface HeaderProps {
     themeMode: 'light' | 'dark';
     onToggleTheme: () => void;
+    onOpenAi: () => void;
 }
 
 function formatDateTime(date: Date) {
@@ -23,7 +24,7 @@ function formatDateTime(date: Date) {
     };
 }
 
-export default function Header({ themeMode, onToggleTheme }: HeaderProps) {
+export default function Header({ themeMode, onToggleTheme, onOpenAi }: HeaderProps) {
     const [now, setNow] = useState(new Date());
 
     useEffect(() => {
@@ -51,6 +52,16 @@ export default function Header({ themeMode, onToggleTheme }: HeaderProps) {
                     <span className="hidden lg:inline text-xs">{date}</span>
                     <span className="text-xs font-mono font-medium text-black/70 dark:text-white/70">{time}</span>
                 </div>
+                <button
+                    data-testid="ai-markdown-open"
+                    onClick={onOpenAi}
+                    className="inline-flex items-center gap-1.5 h-8 px-2.5 sm:px-3 rounded-md border border-[#00000012] dark:border-[#ffffff16] text-[12px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7] bg-white/45 dark:bg-white/[0.06] hover:bg-white/70 dark:hover:bg-white/[0.1] transition-colors active:scale-[0.97]"
+                    title="AI 优化 Markdown"
+                >
+                    <Sparkles size={14} className="text-[#0066cc] dark:text-[#0a84ff]" />
+                    <span className="hidden sm:inline">AI 优化</span>
+                    <span className="sm:hidden">AI</span>
+                </button>
                 <div className="w-px h-4 bg-black/10 dark:bg-white/10 hidden sm:block" />
                 <motion.button
                     whileHover={{ scale: 1.05 }}

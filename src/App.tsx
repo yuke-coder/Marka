@@ -15,6 +15,8 @@ import EditorPanel from './components/EditorPanel';
 import PreviewPanel from './components/PreviewPanel';
 import Divider from './components/Divider';
 import CopyToast, { type Notice } from './components/CopyToast';
+import AiMarkdownDialog from './components/AiMarkdownDialog';
+import type { AiApplyMode } from './lib/aiMarkdown';
 
 const SPLIT_RATIO_STORAGE_KEY = 'marka:splitRatio';
 const SPLIT_RATIO_DEFAULT = 38.2;
@@ -127,6 +129,29 @@ function isInIframe(): boolean {
     }
 }
 
+// 剪贴板回退方案：当 Clipboard API 不可用时使用 execCommand
+function fallbackCopyText(text: string): void {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+}
+
+function fallbackCopyHtml(html: string): void {
+    const listener = (e: ClipboardEvent) => {
+        e.clipboardData?.setData('text/html', html);
+        e.clipboardData?.setData('text/plain', html.replace(/<[^>]*>/g, ''));
+        e.preventDefault();
+    };
+    document.addEventListener('copy', listener);
+    document.execCommand('copy');
+    document.removeEventListener('copy', listener);
+}
+
 function getForceMobileMode(): boolean {
     if (typeof window === 'undefined') return false;
     if (isInIframe()) return false;
@@ -149,8 +174,13 @@ export default function App() {
     const [renderedHtml, setRenderedHtml] = useState<string>('');
     const [activeTheme, setActiveTheme] = useState(THEMES[0].id);
     const [notice, setNotice] = useState<Notice | null>(null);
-    const showNotice = (title: string, description: string, tone: Notice['tone']) =>
-        setNotice({ title, description, tone });
+    const showNotice = (
+        title: string,
+        description: string,
+        tone: Notice['tone'],
+        action?: Pick<Notice, 'actionLabel' | 'onAction'>
+    ) => setNotice({ title, description, tone, ...action });
+    const [aiMarkdownOpen, setAiMarkdownOpen] = useState(false);
     const [isCopying, setIsCopying] = useState(false);
     const [previewDevice, setPreviewDevice] = useState<'mobile' | 'tablet' | 'pc'>(() =>
         embedded ? 'mobile' : loadPreviewDevice()
@@ -174,6 +204,21 @@ export default function App() {
     const swipeRef = useRef<{ startX: number; startY: number; locked: boolean | 'h' | 'v' }>({ startX: 0, startY: 0, locked: false });
     const [swipeDx, setSwipeDx] = useState(0);
     const [isSwiping, setIsSwiping] = useState(false);
+    const mobileToolbarRef = useRef<HTMLDivElement>(null);
+    const [toolbarCompact, setToolbarCompact] = useState(false);
+
+    // 检测移动端工具栏溢出，动态切换紧凑模式
+    useEffect(() => {
+        if (isDesktop) return;
+        const el = mobileToolbarRef.current;
+        if (!el) return;
+        const check = () => setToolbarCompact(el.scrollWidth > el.clientWidth + 1);
+        const timer = setTimeout(check, 50);
+        const ro = new ResizeObserver(check);
+        ro.observe(el);
+        return () => { clearTimeout(timer); ro.disconnect(); };
+    }, [isDesktop, activePanel, activeTheme]);
+
     const tabIndicatorX = useMemo(() => {
         const w = typeof window !== 'undefined' ? window.innerWidth : 390;
         const base = activePanel === 'editor' ? 0 : 1;
@@ -247,6 +292,16 @@ export default function App() {
             // ignore quota / privacy errors
         }
     }, [previewDevice]);
+
+    // 主动请求剪贴板权限，确保复制功能在任何情况下都可用
+    useEffect(() => {
+        if (typeof navigator !== 'undefined' && navigator.permissions) {
+            navigator.permissions.query({ name: 'clipboard-write' as PermissionName })
+                .catch(() => { /* 部分浏览器不支持，忽略 */ });
+            navigator.permissions.query({ name: 'clipboard-read' as PermissionName })
+                .catch(() => { /* 部分浏览器不支持，忽略 */ });
+        }
+    }, []);
 
     // 移动端视图下强制使用手机预览模式
     useEffect(() => {
@@ -335,6 +390,40 @@ export default function App() {
         });
     };
 
+    const applyAiMarkdown = (markdown: string, mode: AiApplyMode) => {
+        const previous = markdownInput;
+        let next = markdown;
+        let cursorPos: number | null = null;
+        const textarea = editorScrollRef.current;
+
+        if (mode === 'append') {
+            next = `${markdownInput.trimEnd()}\n\n${markdown}`.trimStart();
+        } else if (mode === 'insert' && textarea) {
+            const start = textarea.selectionStart;
+            const end = textarea.selectionEnd;
+            next = markdownInput.slice(0, start) + markdown + markdownInput.slice(end);
+            cursorPos = start + markdown.length;
+        }
+
+        setMarkdownInput(next);
+
+        if (cursorPos !== null && textarea) {
+            setTimeout(() => {
+                textarea.focus();
+                textarea.setSelectionRange(cursorPos, cursorPos);
+            }, 0);
+        }
+
+        const modeLabel = mode === 'replace' ? '已替换当前内容' : mode === 'insert' ? '已插入到光标处' : '已追加到末尾';
+        showNotice('AI Markdown 已应用', modeLabel, 'success', {
+            actionLabel: '撤销',
+            onAction: () => {
+                setMarkdownInput(previous);
+                showNotice('已撤销', '已恢复 AI 应用前的内容', 'success');
+            },
+        });
+    };
+
     useEffect(() => {
         // Core rendering: markdown → HTML → styled HTML
         const rawHtml = md.render(preprocessMarkdown(markdownInput));
@@ -418,6 +507,13 @@ export default function App() {
         syncScrollPosition(previewElement, editorElement, 'preview');
     };
 
+    const handleSelectAll = useCallback(() => {
+        const textarea = editorScrollRef.current;
+        if (!textarea) return;
+        textarea.focus();
+        textarea.select();
+    }, []);
+
     const handleCopy = async () => {
         if (!previewRef.current) return;
         setIsCopying(true);
@@ -427,11 +523,15 @@ export default function App() {
             const blob = new Blob([finalHtmlForCopy], { type: 'text/html' });
             const textBlob = new Blob([previewRef.current.innerText], { type: 'text/plain' });
 
-            const clipboardItem = new ClipboardItem({
-                'text/html': blob,
-                'text/plain': textBlob
-            });
-            await navigator.clipboard.write([clipboardItem]);
+            try {
+                const clipboardItem = new ClipboardItem({
+                    'text/html': blob,
+                    'text/plain': textBlob
+                });
+                await navigator.clipboard.write([clipboardItem]);
+            } catch {
+                fallbackCopyHtml(finalHtmlForCopy);
+            }
 
             showNotice('排版已复制', '可直接粘贴到公众号编辑器', 'success');
         } catch (err) {
@@ -448,7 +548,8 @@ export default function App() {
             showNotice('Markdown 已复制', '原始 Markdown 源码已复制到剪贴板', 'success');
         } catch (err) {
             console.error('Copy Markdown failed', err);
-            showNotice('复制失败', '请检查浏览器剪贴板权限', 'error');
+            fallbackCopyText(markdownInput);
+            showNotice('Markdown 已复制', '原始 Markdown 源码已复制到剪贴板', 'success');
         }
     };
 
@@ -558,16 +659,20 @@ export default function App() {
     const appContent = (
         <div className="flex flex-col h-screen overflow-hidden antialiased bg-[#fbfbfd] dark:bg-black transition-colors duration-300">
 
-            <Header themeMode={themeMode} onToggleTheme={toggleTheme} />
+            <Header
+                themeMode={themeMode}
+                onToggleTheme={toggleTheme}
+                onOpenAi={() => setAiMarkdownOpen(true)}
+            />
 
             {/* 移动端 Tab 切换 - 精致 segmented control */}
             <div className="md:hidden flex items-stretch z-[90] px-3 py-1.5">
                 <div className="relative flex items-center w-full bg-black/[0.04] dark:bg-white/[0.07] rounded-lg p-0.5 border border-[#0000000c] dark:border-[#ffffff12]">
                     <div
-                        className="absolute top-0.5 bottom-0.5 w-[calc(50%-4px)] bg-white dark:bg-[#3a3a3c] rounded-[5px] shadow-sm"
+                        className="absolute top-0.5 bottom-0.5 left-0 w-[calc(50%-4px)] bg-white dark:bg-[#3a3a3c] rounded-[5px] shadow-sm"
                         style={{
-                            left: `calc(${tabIndicatorX * 50}% + 2px)`,
-                            transition: isSwiping ? 'none' : 'left 0.3s cubic-bezier(0.25, 0.1, 0.25, 1)',
+                            transform: `translateX(calc(${tabIndicatorX * 100}% + 2px))`,
+                            transition: isSwiping ? 'none' : 'transform 0.35s cubic-bezier(0.32, 0.72, 0, 1)',
                         }}
                     />
                     <button
@@ -606,10 +711,10 @@ export default function App() {
                 />
             </div>
 
-            {/* 移动端工具栏（仅预览Tab显示）：单行，模板按钮在左，操作按钮在右 */}
+            {/* 移动端工具栏（仅预览Tab显示）：整行自适应，溢出时切换紧凑模式 */}
             {activePanel === 'preview' && (
-                <div className="md:hidden glass-toolbar flex items-center justify-between px-2 py-1 z-[90] gap-1 overflow-x-auto no-scrollbar">
-                    <ThemeSelector activeTheme={activeTheme} onThemeChange={setActiveTheme} mobile />
+                <div ref={mobileToolbarRef} className="md:hidden glass-toolbar flex items-center px-2 py-1.5 z-[90] gap-1.5 overflow-hidden">
+                    <ThemeSelector activeTheme={activeTheme} onThemeChange={setActiveTheme} mobile compact={toolbarCompact} />
                     <MobileToolbar
                         onExportPdf={handleExportPdf}
                         onExportHtml={handleExportHtml}
@@ -617,6 +722,7 @@ export default function App() {
                         onCopy={handleCopy}
                         onCopyMarkdown={handleCopyMarkdown}
                         isCopying={isCopying}
+                        compact={toolbarCompact}
                     />
                 </div>
             )}
@@ -674,8 +780,8 @@ export default function App() {
                         onTouchMove={handleTouchMove}
                         onTouchEnd={handleTouchEnd}
                         style={{
-                            transform: `translateX(calc(${activePanel === 'editor' ? '0%' : '-50%'} + ${swipeDx}px))`,
-                            transition: isSwiping ? 'none' : 'transform 0.3s cubic-bezier(0.25, 0.1, 0.25, 1)',
+                            transform: `translateX(${(activePanel === 'editor' ? 0 : -(typeof window !== 'undefined' ? window.innerWidth : 0)) + swipeDx}px)`,
+                            transition: isSwiping ? 'none' : 'transform 0.35s cubic-bezier(0.32, 0.72, 0, 1)',
                             touchAction: 'pan-y',
                         }}
                     >
@@ -686,6 +792,7 @@ export default function App() {
                                 editorScrollRef={editorScrollRef}
                                 onEditorScroll={handleEditorScroll}
                                 scrollSyncEnabled={scrollSyncEnabled}
+                                onSelectAll={handleSelectAll}
                             />
                         </div>
                         <div className="w-1/2 h-full flex-shrink-0 flex flex-col overflow-hidden">
@@ -706,6 +813,15 @@ export default function App() {
                     </div>
                 )}
             </main>
+
+            <AiMarkdownDialog
+                isOpen={aiMarkdownOpen}
+                isDesktop={isDesktop}
+                currentMarkdown={markdownInput}
+                onClose={() => setAiMarkdownOpen(false)}
+                onApply={applyAiMarkdown}
+                showNotice={showNotice}
+            />
 
             <CopyToast notice={notice} onClose={() => setNotice(null)} />
 
@@ -731,6 +847,7 @@ export default function App() {
                             src={embedUrl.toString()}
                             className="block w-full h-full border-none"
                             style={{ background: '#fbfbfd' }}
+                            allow="clipboard-write; clipboard-read"
                         />
                     </div>
                 </div>

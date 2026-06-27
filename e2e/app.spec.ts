@@ -105,6 +105,30 @@ test('renders bold text with punctuation without leaking markdown markers', asyn
     await expect(preview).toContainText('2025年初，伦敦黄金市场的一个月拆借利率一度升至5%。');
 });
 
+test('opens AI Markdown as a desktop modal from the header', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/');
+
+    await page.getByTestId('ai-markdown-open').click();
+
+    await expect(page.getByTestId('ai-desktop-modal')).toBeVisible();
+    await expect(page.getByRole('button', { name: '排版模式 保留原文，只做 Markdown 化' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '改写模式 可调整表达，但不编造事实' })).toBeVisible();
+    await expect(page.getByTestId('ai-source-text')).toBeVisible();
+    await expect(page.getByRole('button', { name: '生成 Markdown' })).toBeDisabled();
+});
+
+test('opens AI Markdown as a mobile bottom sheet from the header', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/');
+
+    await page.getByTestId('ai-markdown-open').click();
+
+    await expect(page.getByTestId('ai-mobile-sheet')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'AI 优化' })).toBeVisible();
+    await expect(page.getByTestId('ai-source-text')).toBeVisible();
+});
+
 for (const device of [
     { testId: 'device-mobile', label: 'mobile' },
     { testId: 'device-tablet', label: 'tablet' }

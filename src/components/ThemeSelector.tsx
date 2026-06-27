@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronDown, Check, X, Palette } from 'lucide-react';
+import { ChevronDown, Check, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { THEMES, THEME_GROUPS, type Theme } from '../lib/themes';
 
@@ -8,6 +8,7 @@ interface ThemeSelectorProps {
     activeTheme: string;
     onThemeChange: (themeId: string) => void;
     mobile?: boolean;
+    compact?: boolean;
 }
 
 function extractStyle(styleStr: string, prop: string): string | null {
@@ -285,25 +286,20 @@ function DesktopThemeDropdown({
     return createPortal(panel, document.body);
 }
 
-export default function ThemeSelector({ activeTheme, onThemeChange, mobile }: ThemeSelectorProps) {
+export default function ThemeSelector({ activeTheme, onThemeChange, mobile, compact }: ThemeSelectorProps) {
     const [isThemeOpen, setIsThemeOpen] = useState(false);
     const buttonRef = useRef<HTMLButtonElement>(null);
     const selectedThemeName = THEMES.find(t => t.id === activeTheme)?.name;
 
     if (mobile) {
-        const currentThemeShort = selectedThemeName
-            ? selectedThemeName.split(/[\s·]/)[0]
-            : '模板';
-
         return (
             <>
-            <div className="relative shrink-0">
+            <div className="relative min-w-0 flex items-center">
                 <button
                     onClick={() => setIsThemeOpen(true)}
-                    className="inline-flex items-center gap-1 h-8 px-2.5 rounded-lg text-[12px] font-medium transition-colors duration-100 border select-none shrink-0 border-[#00000010] dark:border-[#ffffff16] text-[#5e5e63] dark:text-[#98989d] bg-transparent active:bg-black/[0.06] dark:active:bg-white/[0.08] touch-manipulation active:scale-95"
+                    className={`inline-flex items-center ${compact ? 'h-7 px-1.5 text-[11px]' : 'h-8 px-2.5 text-[12px]'} rounded-lg font-medium transition-all duration-150 border select-none border-[#00000010] dark:border-[#ffffff16] text-[#5e5e63] dark:text-[#98989d] bg-transparent active:bg-black/[0.06] dark:active:bg-white/[0.08] touch-manipulation active:scale-95 min-w-0`}
                 >
-                    <Palette size={13} />
-                    <span className="max-w-[60px] truncate">{currentThemeShort}</span>
+                    <span className="truncate text-left">{selectedThemeName || '模板'}</span>
                 </button>
             </div>
             <MobileThemeModal

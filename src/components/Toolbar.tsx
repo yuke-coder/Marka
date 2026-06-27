@@ -22,6 +22,7 @@ interface MobileToolbarProps {
     onCopy: () => void;
     onCopyMarkdown: () => void;
     isCopying: boolean;
+    compact?: boolean;
 }
 
 const tb = 'inline-flex items-center justify-center gap-1 h-7 px-2.5 rounded-md text-[12px] font-medium transition-all duration-150 border select-none shrink-0 whitespace-nowrap';
@@ -177,49 +178,49 @@ export function DesktopToolbar({
     );
 }
 
-const iconBtn = 'inline-flex items-center justify-center w-8 h-8 rounded-lg text-[11px] font-medium transition-colors duration-100 border select-none shrink-0 touch-manipulation active:scale-95';
-
 export function MobileToolbar({
     onExportPdf, onExportHtml, onExportMarkdown,
-    onCopy, onCopyMarkdown, isCopying
+    onCopy, onCopyMarkdown, isCopying, compact
 }: MobileToolbarProps) {
+    const iconCls = compact
+        ? 'flex items-center justify-center flex-auto h-7 min-w-0 rounded-md text-[11px] font-medium transition-all duration-150 border select-none touch-manipulation active:scale-95'
+        : 'flex items-center justify-center flex-auto h-8 min-w-0 rounded-lg text-[11px] font-medium transition-all duration-150 border select-none touch-manipulation active:scale-95';
+    const iconSize = compact ? 13 : 15;
+
     return (
-        <div className="flex items-center shrink-0 gap-1 overflow-x-auto no-scrollbar scroll-touch">
+        <div className="flex items-center flex-1 min-w-0 gap-0.5">
             <button
                 data-testid="export-pdf"
                 onClick={onExportPdf}
-                className={`${iconBtn} ${idle}`}
+                className={`${iconCls} ${idle}`}
                 title="导出 PDF"
             >
-                <FileType2 size={15} />
+                <FileType2 size={iconSize} />
             </button>
             <button
                 data-testid="export-html"
                 onClick={onExportHtml}
-                className={`${iconBtn} ${idle}`}
+                className={`${iconCls} ${idle}`}
                 title="导出 HTML"
             >
-                <FileCode2 size={15} />
+                <FileCode2 size={iconSize} />
             </button>
             <button
                 data-testid="export-md"
                 onClick={onExportMarkdown}
-                className={`${iconBtn} ${idle}`}
+                className={`${iconCls} ${idle}`}
                 title="导出 Markdown"
             >
-                <FileText size={15} />
+                <FileText size={iconSize} />
             </button>
-
-            <div className="w-px h-5 bg-[#00000010] dark:bg-[#ffffff15] mx-0.5 shrink-0" />
-
             <button
                 data-testid="copy-markdown-button"
                 onClick={onCopyMarkdown}
-                className={`inline-flex items-center justify-center gap-1 h-8 px-2.5 rounded-lg text-[11px] font-medium transition-colors duration-100 border select-none shrink-0 whitespace-nowrap touch-manipulation active:scale-95 ${idle}`}
+                className={`flex items-center justify-center flex-auto ${compact ? 'h-7 gap-0.5 px-1 text-[10px]' : 'h-8 gap-1 px-2 text-[11px]'} min-w-0 rounded-lg font-medium transition-all duration-150 border select-none whitespace-nowrap touch-manipulation active:scale-95 ${idle}`}
                 title="复制 Markdown 源码"
             >
-                <FileText size={13} />
-                <span>复制 MD</span>
+                <FileText size={compact ? 12 : 13} className="shrink-0" />
+                {!compact && <span>复制 MD</span>}
             </button>
 
             <motion.button
@@ -228,10 +229,10 @@ export function MobileToolbar({
                 disabled={isCopying}
                 whileTap={{ scale: 0.95 }}
                 transition={{ duration: 0.06 }}
-                className="inline-flex items-center gap-1 h-8 px-3 rounded-lg text-[12px] font-semibold transition-colors duration-100 shrink-0 bg-[#1d1d1f] dark:bg-[#f5f5f7] text-white dark:text-black active:opacity-80 disabled:opacity-60 disabled:cursor-not-allowed shadow-[0_1px_2px_rgba(0,0,0,0.12)] dark:shadow-[0_1px_2px_rgba(0,0,0,0.3)] touch-manipulation"
+                className={`flex items-center justify-center flex-auto ${compact ? 'h-7 gap-0.5 px-1.5 text-[11px]' : 'h-8 gap-1 px-2 text-[12px]'} min-w-0 rounded-lg font-semibold transition-all duration-150 bg-[#1d1d1f] dark:bg-[#f5f5f7] text-white dark:text-black active:opacity-80 disabled:opacity-60 disabled:cursor-not-allowed shadow-[0_1px_2px_rgba(0,0,0,0.12)] dark:shadow-[0_1px_2px_rgba(0,0,0,0.3)] touch-manipulation`}
             >
-                {isCopying ? <Loader2 className="animate-spin" size={13} /> : <Copy size={13} />}
-                <span className="text-[11px]">{isCopying ? '打包中' : '复制公众号'}</span>
+                {isCopying ? <Loader2 className="animate-spin shrink-0" size={compact ? 12 : 13} /> : <Copy size={compact ? 12 : 13} className="shrink-0" />}
+                <span className="whitespace-nowrap">{compact ? (isCopying ? '...' : '复制') : (isCopying ? '打包中' : '复制公众号')}</span>
             </motion.button>
         </div>
     );
