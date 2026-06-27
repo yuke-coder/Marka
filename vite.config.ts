@@ -1,6 +1,5 @@
 import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
-import basicSsl from '@vitejs/plugin-basic-ssl'
 import { handleAiMarkdownRequest } from './server/aiMarkdown'
 
 function aiMarkdownApi(): Plugin {
@@ -30,14 +29,23 @@ function aiMarkdownApi(): Plugin {
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, process.cwd(), '')
-    process.env.OPENAI_API_KEY ||= env.OPENAI_API_KEY
-    process.env.OPENAI_MODEL ||= env.OPENAI_MODEL
+    process.env.OPENAI_API_KEY ||= env.OPENAI_API_KEY?.trim()
+    process.env.OPENAI_MODEL ||= env.OPENAI_MODEL?.trim()
+    process.env.OPENAI_PROXY ||= env.OPENAI_PROXY?.trim()
 
     const pagesBasePath = process.env.VITE_PAGES_BASE_PATH
     const base = pagesBasePath != null && pagesBasePath !== '' ? `${pagesBasePath}/` : '/'
 
     return {
-        plugins: [react(), basicSsl(), aiMarkdownApi()],
+        plugins: [react(), aiMarkdownApi()],
         base,
+        server: {
+            port: 5173,
+            strictPort: true,
+        },
+        preview: {
+            port: 5173,
+            strictPort: true,
+        },
     }
 })

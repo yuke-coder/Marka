@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type TouchEvent as ReactTouchEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Clipboard, Loader2, RefreshCcw, Sparkles, Square, Wand2, X } from 'lucide-react';
+import { Clipboard, Eraser, Loader2, RefreshCcw, Sparkles, Square, Wand2, X } from 'lucide-react';
 import {
     cleanAiMarkdown,
     streamAiMarkdown,
@@ -51,7 +51,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
     const abortRef = useRef<AbortController | null>(null);
     const streamedRef = useRef('');
     const sourceTextareaRef = useRef<HTMLTextAreaElement>(null);
-    const modeSwipeRef = useRef<{ startX: number; startY: number; locked: boolean | 'h' | 'v' }>({ startX: 0, startY: 0, locked: false });
+    const modeSwipeRef = useRef<{ startX: number; startY: number; locked: false | 'h' | 'v' }>({ startX: 0, startY: 0, locked: false });
 
     const isGenerating = phase === 'generating';
     const canGenerate = sourceText.trim().length > 0 && !isGenerating;
@@ -101,39 +101,44 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
     };
 
     const pasteSourceText = async () => {
+        // 在用户手势内立即启动剪贴板读取，这是唯一能触发浏览器权限申请的方式。
+        const clipboardPromise = navigator.clipboard?.readText?.() ?? Promise.resolve(null);
         sourceTextareaRef.current?.focus();
 
-        const readViaClipboardApi = async (): Promise<string | null> => {
-            if (!navigator.clipboard?.readText) return null;
-            try {
-                return await navigator.clipboard.readText();
-            } catch {
-                return null;
-            }
-        };
-
-        const readViaExecCommand = (): string | null => {
-            const textarea = sourceTextareaRef.current;
-            if (!textarea) return null;
-            const original = textarea.value;
-            const start = textarea.selectionStart ?? original.length;
-            textarea.focus();
-            if (!document.execCommand('paste')) return null;
-            const pasted = textarea.value.slice(start);
-            return pasted || (textarea.value !== original ? textarea.value : null);
-        };
-
         try {
-            const text = (await readViaClipboardApi()) ?? readViaExecCommand();
+            let text: string | null = await clipboardPromise;
+
+            // 降级：尝试 execCommand 粘贴（现代浏览器大多已禁用，保留作为兜底）。
+            if (!text) {
+                const textarea = sourceTextareaRef.current;
+                if (textarea) {
+                    const original = textarea.value;
+                    const start = textarea.selectionStart ?? original.length;
+                    textarea.focus();
+                    if (document.execCommand('paste')) {
+                        text = textarea.value.slice(start) || (textarea.value !== original ? textarea.value : null);
+                    }
+                }
+            }
+
             if (!text) {
                 showNotice('粘贴失败', '未获得剪贴板权限或剪贴板为空', 'error');
+                sourceTextareaRef.current?.focus();
                 return;
             }
+
             insertSourceText(text);
             showNotice('已粘贴', '剪贴板内容已粘贴到纯文本输入框', 'success');
         } catch {
             showNotice('粘贴失败', '读取剪贴板失败', 'error');
+            sourceTextareaRef.current?.focus();
         }
+    };
+
+    const clearSourceText = () => {
+        setSourceText('');
+        sourceTextareaRef.current?.focus();
+        showNotice('已清除', '纯文本输入框已清空', 'success');
     };
 
     const handleSheetPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -329,15 +334,26 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
             <label className={`block ${compact ? 'rounded-xl border border-[#0000000f] dark:border-[#ffffff12] bg-white/72 dark:bg-[#242426]/72 p-3 shadow-sm' : ''}`}>
                 <span className="mb-2 flex items-center justify-between gap-2">
                     <span className="text-[12px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7]">纯文本内容</span>
-                    <button
-                        type="button"
-                        onClick={() => void pasteSourceText()}
-                        disabled={isGenerating}
-                        className="inline-flex h-7 items-center gap-1 rounded-md border border-[#00000012] dark:border-[#ffffff16] px-2 text-[11px] font-medium text-[#0066cc] dark:text-[#0a84ff] transition-colors hover:bg-[#0066cc]/8 dark:hover:bg-[#0a84ff]/10 disabled:opacity-50"
-                    >
-                        <Clipboard size={12} />
-                        粘贴
-                    </button>
+                    <span className="flex items-center gap-1.5">
+                        <button
+                            type="button"
+                            onClick={() => void pasteSourceText()}
+                            disabled={isGenerating}
+                            className="inline-flex h-7 items-center gap-1 rounded-md border border-[#00000012] dark:border-[#ffffff16] px-2 text-[11px] font-medium text-[#0066cc] dark:text-[#0a84ff] transition-colors hover:bg-[#0066cc]/8 dark:hover:bg-[#0a84ff]/10 disabled:opacity-50"
+                        >
+                            <Clipboard size={12} />
+                            粘贴
+                        </button>
+                        <button
+                            type="button"
+                            onClick={clearSourceText}
+                            disabled={isGenerating || !sourceText}
+                            className="inline-flex h-7 items-center gap-1 rounded-md border border-[#00000012] dark:border-[#ffffff16] px-2 text-[11px] font-medium text-[#6e6e73] dark:text-[#a1a1a6] transition-colors hover:bg-black/[0.04] dark:hover:bg-white/[0.06] disabled:opacity-50"
+                        >
+                            <Eraser size={12} />
+                            清除
+                        </button>
+                    </span>
                 </span>
                 <textarea
                     ref={sourceTextareaRef}

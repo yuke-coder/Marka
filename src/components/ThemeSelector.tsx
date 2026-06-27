@@ -7,8 +7,6 @@ import { THEMES, THEME_GROUPS, type Theme } from '../lib/themes';
 interface ThemeSelectorProps {
     activeTheme: string;
     onThemeChange: (themeId: string) => void;
-    mobile?: boolean;
-    compact?: boolean;
 }
 
 function extractStyle(styleStr: string, prop: string): string | null {
@@ -40,110 +38,6 @@ const segWrap = 'inline-flex items-center p-0.5 rounded-lg bg-black/[0.035] dark
 const pillBtn = 'inline-flex items-center justify-center h-6 px-3 rounded-[5px] text-[12px] font-medium transition-all duration-200 select-none whitespace-nowrap';
 const pillOn = 'bg-white dark:bg-[#2c2c2e] text-[#1d1d1f] dark:text-[#f5f5f7] shadow-[0_1px_2px_rgba(0,0,0,0.07)] dark:shadow-[0_1px_2px_rgba(0,0,0,0.4)]';
 const pillOff = 'text-[#8e8e93] dark:text-[#8a8a8f] hover:text-[#1d1d1f] dark:hover:text-[#f5f5f7] hover:bg-black/[0.04] dark:hover:bg-white/[0.06] active:scale-95';
-
-function MobileThemeModal({
-    isOpen,
-    onClose,
-    activeTheme,
-    onThemeChange,
-}: {
-    isOpen: boolean;
-    onClose: () => void;
-    activeTheme: string;
-    onThemeChange: (id: string) => void;
-}) {
-    const [showBottomFade, setShowBottomFade] = useState(true);
-    const scrollRef = useRef<HTMLDivElement>(null);
-
-    const handleScroll = () => {
-        if (!scrollRef.current) return;
-        const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
-        setShowBottomFade(scrollHeight - scrollTop - clientHeight > 20);
-    };
-
-    useEffect(() => {
-        if (isOpen && scrollRef.current) {
-            handleScroll();
-        }
-    }, [isOpen]);
-
-    const modal = (
-        <AnimatePresence>
-        {isOpen && (
-            <>
-                <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="fixed inset-0 z-[95] bg-black/20 dark:bg-black/40"
-                    onClick={onClose}
-                />
-                <motion.div
-                    initial={{ opacity: 0, y: '100%' }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: '100%' }}
-                    transition={{ duration: 0.28, ease: [0.25, 0.1, 0.25, 1] }}
-                    className="fixed left-0 right-0 bottom-0 z-[96] bg-white dark:bg-[#1c1c1e] rounded-t-2xl overflow-hidden"
-                    style={{ maxHeight: '80vh', WebkitOverflowScrolling: 'touch' }}
-                >
-                    <div className="flex items-center justify-between px-4 pt-4 pb-2">
-                        <span className="text-[15px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7]">选择模板 · {THEMES.length} 款</span>
-                        <button
-                            onClick={onClose}
-                            className="p-1 rounded-full hover:bg-[#00000008] dark:hover:bg-[#ffffff10] active:bg-[#00000012] dark:active:bg-[#ffffff18] transition-colors touch-manipulation"
-                        >
-                            <X size={18} className="text-[#86868b]" />
-                        </button>
-                    </div>
-                    <div
-                        ref={scrollRef}
-                        onScroll={handleScroll}
-                        className="overflow-y-auto px-4 pb-6 overscroll-contain"
-                        style={{ maxHeight: 'calc(80vh - 52px)', WebkitOverflowScrolling: 'touch', touchAction: 'pan-y' }}
-                    >
-                        {THEME_GROUPS.map((group, groupIdx) => (
-                            <div key={group.label}>
-                                <div className={`flex items-center gap-2 ${groupIdx > 0 ? 'mt-4 pt-4 border-t border-[#00000010] dark:border-[#ffffff10]' : 'mt-1'}`}>
-                                    <span className="text-[12px] font-semibold text-[#86868b] dark:text-[#a1a1a6] uppercase tracking-widest">{group.label}</span>
-                                    <span className="text-[11px] text-[#b0b0b5] dark:text-[#666]">{group.themes.length} 款</span>
-                                </div>
-                                <div className="grid grid-cols-2 gap-2 mt-2">
-                                    {group.themes.map(theme => (
-                                        <button
-                                            key={theme.id}
-                                            onClick={() => {
-                                                onThemeChange(theme.id);
-                                                onClose();
-                                            }}
-                                            className={`relative flex flex-col items-start gap-1.5 p-3 rounded-xl text-left transition-colors touch-manipulation
-                                                    ${activeTheme === theme.id
-                                                    ? 'bg-[#0066cc]/8 dark:bg-[#0a84ff]/10 ring-2 ring-[#0066cc] dark:ring-[#0a84ff]'
-                                                    : 'bg-[#f5f5f7] dark:bg-[#2c2c2e] active:bg-[#ebebed] dark:active:bg-[#3a3a3c]'
-                                                }`}
-                                        >
-                                            <div className="flex items-center justify-between w-full">
-                                                <ThemeSwatch styles={theme.styles} />
-                                                {activeTheme === theme.id && <Check size={14} className="text-[#0066cc] dark:text-[#0a84ff]" />}
-                                            </div>
-                                            <span className="text-[13px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7] leading-tight">{theme.name}</span>
-                                            <span className="text-[11px] text-[#86868b] dark:text-[#a1a1a6] leading-snug line-clamp-2">{theme.description}</span>
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                    <div
-                        className={`pointer-events-none absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-white dark:from-[#1c1c1e] to-transparent transition-opacity duration-200 ${showBottomFade ? 'opacity-100' : 'opacity-0'}`}
-                    />
-                </motion.div>
-            </>
-        )}
-        </AnimatePresence>
-    );
-
-    return createPortal(modal, document.body);
-}
 
 function DesktopThemeDropdown({
     isOpen,
@@ -267,7 +161,7 @@ function DesktopThemeDropdown({
                                             {activeTheme === theme.id && <Check size={14} className="text-[#0066cc] dark:text-[#0a84ff]" />}
                                         </div>
                                         <span className="text-[13px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7] leading-tight">{theme.name}</span>
-                                        <span className="text-[11px] text-[#86868b] dark:text-[#a1a1a6] leading-snug line-clamp-2">{theme.description}</span>
+                                        <span className="text-[11px] text-[#86868b] dark:text-[#8a8a8f] leading-snug line-clamp-2">{theme.description}</span>
                                     </button>
                                 ))}
                             </div>
@@ -286,31 +180,10 @@ function DesktopThemeDropdown({
     return createPortal(panel, document.body);
 }
 
-export default function ThemeSelector({ activeTheme, onThemeChange, mobile, compact }: ThemeSelectorProps) {
+export default function ThemeSelector({ activeTheme, onThemeChange }: ThemeSelectorProps) {
     const [isThemeOpen, setIsThemeOpen] = useState(false);
     const buttonRef = useRef<HTMLButtonElement>(null);
     const selectedThemeName = THEMES.find(t => t.id === activeTheme)?.name;
-
-    if (mobile) {
-        return (
-            <>
-            <div className="relative min-w-0 flex items-center">
-                <button
-                    onClick={() => setIsThemeOpen(true)}
-                    className={`inline-flex items-center ${compact ? 'h-7 px-1.5 text-[11px]' : 'h-8 px-2.5 text-[12px]'} rounded-lg font-medium transition-all duration-150 border select-none border-[#00000010] dark:border-[#ffffff16] text-[#5e5e63] dark:text-[#98989d] bg-transparent active:bg-black/[0.06] dark:active:bg-white/[0.08] touch-manipulation active:scale-95 min-w-0`}
-                >
-                    <span className="truncate text-left">{selectedThemeName || '模板'}</span>
-                </button>
-            </div>
-            <MobileThemeModal
-                isOpen={isThemeOpen}
-                onClose={() => setIsThemeOpen(false)}
-                activeTheme={activeTheme}
-                onThemeChange={onThemeChange}
-            />
-            </>
-        );
-    }
 
     const pillThemeIds = ['apple', 'claude', 'wechat', 'sspai'];
     const pillThemes: Theme[] = pillThemeIds

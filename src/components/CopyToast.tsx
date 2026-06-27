@@ -4,6 +4,7 @@ import { CheckCircle2, Download, AlertCircle, X } from 'lucide-react';
 
 export type NoticeTone = 'success' | 'download' | 'error';
 export type Notice = {
+    id: number;
     title: string;
     description: string;
     tone: NoticeTone;
@@ -39,13 +40,14 @@ export default function CopyToast({ notice, onClose, duration = 3000 }: CopyToas
     useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
 
     useEffect(() => {
-        if (!notice) {
-            elapsedRef.current = 0;
-            setProgress(100);
-            setIsPaused(false);
-            isPausedRef.current = false;
-            return;
-        }
+        // notice 变化或关闭时统一重置进度条和计时。
+        elapsedRef.current = 0;
+        setProgress(100);
+        setIsPaused(false);
+        isPausedRef.current = false;
+
+        if (!notice) return;
+
         let lastTime = performance.now();
         let raf = 0;
         const tick = (now: number) => {
@@ -69,6 +71,7 @@ export default function CopyToast({ notice, onClose, duration = 3000 }: CopyToas
         <AnimatePresence>
             {notice && (
                 <motion.div
+                    key={notice.id}
                     initial={{ opacity: 0, x: 320 }}
                     animate={{ opacity: 1, x: 0 }}
                     exit={{ opacity: 0, x: 320 }}

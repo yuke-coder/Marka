@@ -10,7 +10,7 @@ import { findImagePosition, selectTextAreaRange } from './lib/imageSelector';
 import { findElementPosition, type ElementLocation } from './lib/markdownLocator';
 import Header from './components/Header';
 import ThemeSelector from './components/ThemeSelector';
-import { DesktopToolbar, MobileToolbar } from './components/Toolbar';
+import { DesktopToolbar } from './components/Toolbar';
 import EditorPanel from './components/EditorPanel';
 import PreviewPanel from './components/PreviewPanel';
 import Divider from './components/Divider';
@@ -20,28 +20,8 @@ import type { AiApplyMode } from './lib/aiMarkdown';
 
 const SPLIT_RATIO_STORAGE_KEY = 'marka:splitRatio';
 const SPLIT_RATIO_DEFAULT = 38.2;
-const PREVIEW_DEVICE_STORAGE_KEY = 'marka:previewDevice';
-const PREVIEW_DEVICE_DEFAULT: 'mobile' | 'tablet' | 'pc' = 'pc';
-
-function loadPreviewDevice(): 'mobile' | 'tablet' | 'pc' {
-    try {
-        const raw = localStorage.getItem(PREVIEW_DEVICE_STORAGE_KEY);
-        if (raw === 'mobile' || raw === 'tablet' || raw === 'pc') return raw;
-        return PREVIEW_DEVICE_DEFAULT;
-    } catch {
-        return PREVIEW_DEVICE_DEFAULT;
-    }
-}
-
-// 各预览模式下预览区所需的最小完整宽度（含外边距/内边距，避免设备帧被裁切）：
-// - PC:     840px 内容 + 24px 左边距 + 安全余量 ≈ 880px
-// - Tablet: 720px 设备帧 + 32px*2 padding ≈ 784px
-// - Mobile: 520px 设备帧 + 32px*2 padding ≈ 584px
-const PREVIEW_MIN_PX_BY_DEVICE: Record<'mobile' | 'tablet' | 'pc', number> = {
-    mobile: 584,
-    tablet: 784,
-    pc: 880,
-};
+// PC 预览区所需的最小完整宽度（含外边距/内边距，避免内容被裁切）
+const PREVIEW_MIN_PX = 880;
 // 编辑区最小可读宽度
 const EDITOR_MIN_PX = 280;
 
@@ -59,15 +39,14 @@ function loadSplitRatio(): number {
 }
 
 // 基于容器可用宽度计算中轴线的合法 [minRatio, maxRatio] 区间
-// previewMinPx 随当前预览模式变化，避免在手机/平板模式下的过度限制
-function computeRatioBounds(containerWidth: number, previewMinPx: number): { min: number; max: number } {
+function computeRatioBounds(containerWidth: number): { min: number; max: number } {
     if (containerWidth <= 0) return { min: SPLIT_RATIO_DEFAULT, max: SPLIT_RATIO_DEFAULT };
     const dividerWidth = 6;
     const usable = Math.max(0, containerWidth - dividerWidth);
     // 编辑区宽度 = (ratio/100) * usable >= EDITOR_MIN_PX
     const min = Math.max(0, (EDITOR_MIN_PX / usable) * 100);
-    // 预览区宽度 = ((100-ratio)/100) * usable >= previewMinPx
-    const max = Math.min(100, 100 - (previewMinPx / usable) * 100);
+    // 预览区宽度 = ((100-ratio)/100) * usable >= PREVIEW_MIN_PX
+    const max = Math.min(100, 100 - (PREVIEW_MIN_PX / usable) * 100);
     // 兜底：若容器过小不足以同时满足两端，放宽到允许编辑区更窄
     if (min > max) return { min: 0, max: 100 };
     return { min, max };
@@ -121,14 +100,6 @@ async function saveBlob(blob: Blob, filename: string, ext: string, label: string
     }
 }
 
-function isInIframe(): boolean {
-    try {
-        return typeof window !== 'undefined' && window.self !== window.top;
-    } catch {
-        return true;
-    }
-}
-
 // 剪贴板回退方案：当 Clipboard API 不可用时使用 execCommand
 function fallbackCopyText(text: string): void {
     const ta = document.createElement('textarea');
@@ -152,23 +123,7 @@ function fallbackCopyHtml(html: string): void {
     document.removeEventListener('copy', listener);
 }
 
-function getForceMobileMode(): boolean {
-    if (typeof window === 'undefined') return false;
-    if (isInIframe()) return false;
-    const params = new URLSearchParams(window.location.search);
-    return params.get('mobile') === '1';
-}
-
-function isEmbeddedMobileMode(): boolean {
-    if (typeof window === 'undefined') return false;
-    if (isInIframe()) return true;
-    const params = new URLSearchParams(window.location.search);
-    return params.get('embed') === '1';
-}
-
 export default function App() {
-    const forceMobile = getForceMobileMode();
-    const embedded = isEmbeddedMobileMode();
     const [themeMode, setThemeMode] = useState<'light' | 'dark'>('light');
     const [markdownInput, setMarkdownInput] = useState<string>(defaultContent);
     const [renderedHtml, setRenderedHtml] = useState<string>('');
@@ -179,45 +134,27 @@ export default function App() {
         description: string,
         tone: Notice['tone'],
         action?: Pick<Notice, 'actionLabel' | 'onAction'>
-    ) => setNotice({ title, description, tone, ...action });
+    ) => setNotice({ id: Date.now(), title, description, tone, ...action });
     const [aiMarkdownOpen, setAiMarkdownOpen] = useState(false);
     const [isCopying, setIsCopying] = useState(false);
-    const [previewDevice, setPreviewDevice] = useState<'mobile' | 'tablet' | 'pc'>(() =>
-        embedded ? 'mobile' : loadPreviewDevice()
-    );
-    const [activePanel, setActivePanel] = useState<'editor' | 'preview'>(embedded ? 'preview' : 'editor');
+    const [activePanel, setActivePanel] = useState<'editor' | 'preview'>('editor');
     const [scrollSyncEnabled, setScrollSyncEnabled] = useState(true);
     const [splitRatio, setSplitRatio] = useState<number>(loadSplitRatio);
     const [isDraggingDivider, setIsDraggingDivider] = useState(false);
     const [containerWidth, setContainerWidth] = useState(0);
     const [isDesktop, setIsDesktop] = useState(() =>
-        embedded ? false : (typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches)
+        typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches
     );
     const previewRef = useRef<HTMLDivElement>(null);
     const editorScrollRef = useRef<HTMLTextAreaElement>(null);
     const previewOuterScrollRef = useRef<HTMLDivElement>(null);
-    const previewInnerScrollRef = useRef<HTMLDivElement>(null);
     const mainRef = useRef<HTMLElement>(null);
     const scrollSyncLockRef = useRef<'editor' | 'preview' | null>(null);
     const scrollLockReleaseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    const swipeRef = useRef<{ startX: number; startY: number; locked: boolean | 'h' | 'v' }>({ startX: 0, startY: 0, locked: false });
+    const swipeRef = useRef<{ startX: number; startY: number; locked: false | 'h' | 'v' }>({ startX: 0, startY: 0, locked: false });
     const [swipeDx, setSwipeDx] = useState(0);
     const [isSwiping, setIsSwiping] = useState(false);
-    const mobileToolbarRef = useRef<HTMLDivElement>(null);
-    const [toolbarCompact, setToolbarCompact] = useState(false);
-
-    // 检测移动端工具栏溢出，动态切换紧凑模式
-    useEffect(() => {
-        if (isDesktop) return;
-        const el = mobileToolbarRef.current;
-        if (!el) return;
-        const check = () => setToolbarCompact(el.scrollWidth > el.clientWidth + 1);
-        const timer = setTimeout(check, 50);
-        const ro = new ResizeObserver(check);
-        ro.observe(el);
-        return () => { clearTimeout(timer); ro.disconnect(); };
-    }, [isDesktop, activePanel, activeTheme]);
 
     const tabIndicatorX = useMemo(() => {
         const w = typeof window !== 'undefined' ? window.innerWidth : 390;
@@ -284,40 +221,13 @@ export default function App() {
         }
     }, [splitRatio]);
 
-    // 持久化预览设备模式
+    // 跟踪桌面端断点，控制桌面/移动端布局切换
     useEffect(() => {
-        try {
-            localStorage.setItem(PREVIEW_DEVICE_STORAGE_KEY, previewDevice);
-        } catch {
-            // ignore quota / privacy errors
-        }
-    }, [previewDevice]);
-
-    // 主动请求剪贴板权限，确保复制功能在任何情况下都可用
-    useEffect(() => {
-        if (typeof navigator !== 'undefined' && navigator.permissions) {
-            navigator.permissions.query({ name: 'clipboard-write' as PermissionName })
-                .catch(() => { /* 部分浏览器不支持，忽略 */ });
-            navigator.permissions.query({ name: 'clipboard-read' as PermissionName })
-                .catch(() => { /* 部分浏览器不支持，忽略 */ });
-        }
-    }, []);
-
-    // 移动端视图下强制使用手机预览模式
-    useEffect(() => {
-        if (embedded && previewDevice !== 'mobile') {
-            setPreviewDevice('mobile');
-        }
-    }, [embedded, previewDevice]);
-
-    // 跟踪桌面端断点，用于在移动端隐藏分隔条
-    useEffect(() => {
-        if (embedded) return;
         const mq = window.matchMedia('(min-width: 768px)');
         const handler = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
         mq.addEventListener('change', handler);
         return () => mq.removeEventListener('change', handler);
-    }, [embedded]);
+    }, []);
 
     // 监听 main 容器实际宽度，用于动态计算中轴线可拖拽边界
     // 确保预览区在任何模式下都能完整显示（不被裁切）
@@ -328,16 +238,11 @@ export default function App() {
         update();
         const ro = new ResizeObserver(update);
         ro.observe(el);
-        window.addEventListener('resize', update);
-        return () => {
-            ro.disconnect();
-            window.removeEventListener('resize', update);
-        };
+        return () => ro.disconnect();
     }, []);
 
-    // 基于当前容器宽度与预览模式计算动态边界
-    const previewMinPx = PREVIEW_MIN_PX_BY_DEVICE[previewDevice];
-    const ratioBounds = computeRatioBounds(containerWidth, previewMinPx);
+    // 基于当前容器宽度计算动态边界
+    const ratioBounds = computeRatioBounds(containerWidth);
 
     // 容器宽度变化（如窗口缩放）时，若已保存的 ratio 越界则自动收回
     // 初始化阶段 containerWidth 为 0，ratioBounds 为默认值 {DEFAULT,DEFAULT}，
@@ -358,7 +263,7 @@ export default function App() {
 
         const rect = mainRef.current.getBoundingClientRect();
         // 拖拽开始时锁定本次的边界，避免拖拽中容器宽度抖动
-        const bounds = computeRatioBounds(rect.width, PREVIEW_MIN_PX_BY_DEVICE[previewDevice]);
+        const bounds = computeRatioBounds(rect.width);
 
         const applyClientX = (clientX: number) => {
             const x = clientX - rect.left;
@@ -379,7 +284,7 @@ export default function App() {
         window.addEventListener('pointermove', onMove);
         window.addEventListener('pointerup', onUp);
         window.addEventListener('pointercancel', onUp);
-    }, [previewDevice]);
+    }, []);
 
     const toggleTheme = () => {
         setThemeMode((prev) => {
@@ -441,17 +346,8 @@ export default function App() {
     }, [scrollSyncEnabled, resetScrollSyncLock]);
 
     useEffect(() => {
-        resetScrollSyncLock();
-    }, [previewDevice, resetScrollSyncLock]);
-
-    useEffect(() => {
         return () => resetScrollSyncLock();
     }, [resetScrollSyncLock]);
-
-    const getActivePreviewScrollElement = () => {
-        if (previewDevice === 'pc' || !isDesktop) return previewOuterScrollRef.current;
-        return previewInnerScrollRef.current;
-    };
 
     const syncScrollPosition = (
         sourceElement: HTMLElement,
@@ -486,22 +382,13 @@ export default function App() {
 
     const handleEditorScroll = () => {
         const editorElement = editorScrollRef.current;
-        const previewElement = getActivePreviewScrollElement();
+        const previewElement = previewOuterScrollRef.current;
         if (!editorElement || !previewElement) return;
         syncScrollPosition(editorElement, previewElement, 'editor');
     };
 
     const handlePreviewOuterScroll = () => {
-        if (previewDevice !== 'pc' && isDesktop) return;
         const previewElement = previewOuterScrollRef.current;
-        const editorElement = editorScrollRef.current;
-        if (!previewElement || !editorElement) return;
-        syncScrollPosition(previewElement, editorElement, 'preview');
-    };
-
-    const handlePreviewInnerScroll = () => {
-        if (previewDevice === 'pc' || !isDesktop) return;
-        const previewElement = previewInnerScrollRef.current;
         const editorElement = editorScrollRef.current;
         if (!previewElement || !editorElement) return;
         syncScrollPosition(previewElement, editorElement, 'preview');
@@ -536,7 +423,7 @@ export default function App() {
             showNotice('排版已复制', '可直接粘贴到公众号编辑器', 'success');
         } catch (err) {
             console.error('Copy failed', err);
-            alert('复制格式失败，请检查浏览器剪贴板权限');
+            showNotice('复制失败', '请检查浏览器剪贴板权限', 'error');
         } finally {
             setIsCopying(false);
         }
@@ -640,12 +527,6 @@ export default function App() {
         }
     }, [markdownInput, activePanel]);
 
-    const deviceWidthClass = () => {
-        if (previewDevice === 'mobile') return 'w-[520px] max-w-full';
-        if (previewDevice === 'tablet') return 'w-[800px] max-w-full';
-        return 'w-[840px] xl:w-[1024px] max-w-[95%]';
-    };
-
     // 中轴线动态分栏：编辑区 fr / 分隔条 / 预览区 fr
     // 渲染时再次钳制到当前容器边界，防止状态未及时更新导致预览区被压缩到裁切
     // 容器宽度未就绪时直接使用保存值，避免初次渲染误钳制为默认值产生闪烁
@@ -656,7 +537,7 @@ export default function App() {
             : '1fr',
     };
 
-    const appContent = (
+    return (
         <div className="flex flex-col h-screen overflow-hidden antialiased bg-[#fbfbfd] dark:bg-black transition-colors duration-300">
 
             <Header
@@ -698,8 +579,6 @@ export default function App() {
             <div className="glass-toolbar hidden md:flex items-center justify-between gap-2 px-2 lg:px-4 z-[90]">
                 <ThemeSelector activeTheme={activeTheme} onThemeChange={setActiveTheme} />
                 <DesktopToolbar
-                    previewDevice={previewDevice}
-                    onDeviceChange={setPreviewDevice}
                     onExportPdf={handleExportPdf}
                     onExportHtml={handleExportHtml}
                     onExportMarkdown={handleExportMarkdown}
@@ -711,26 +590,10 @@ export default function App() {
                 />
             </div>
 
-            {/* 移动端工具栏（仅预览Tab显示）：整行自适应，溢出时切换紧凑模式 */}
-            {activePanel === 'preview' && (
-                <div ref={mobileToolbarRef} className="md:hidden glass-toolbar flex items-center px-2 py-1.5 z-[90] gap-1.5 overflow-hidden">
-                    <ThemeSelector activeTheme={activeTheme} onThemeChange={setActiveTheme} mobile compact={toolbarCompact} />
-                    <MobileToolbar
-                        onExportPdf={handleExportPdf}
-                        onExportHtml={handleExportHtml}
-                        onExportMarkdown={handleExportMarkdown}
-                        onCopy={handleCopy}
-                        onCopyMarkdown={handleCopyMarkdown}
-                        isCopying={isCopying}
-                        compact={toolbarCompact}
-                    />
-                </div>
-            )}
-
             {/* 编辑区 & 预览区 */}
             <main
                 ref={mainRef}
-                className={`flex-1 overflow-hidden relative ${isDesktop ? '' : ''}`}
+                className="flex-1 overflow-hidden relative"
             >
                 {/* 桌面端：左右分栏 */}
                 {isDesktop && (
@@ -757,16 +620,11 @@ export default function App() {
                         <div className="flex flex-col overflow-hidden">
                             <PreviewPanel
                                 renderedHtml={renderedHtml}
-                                deviceWidthClass={deviceWidthClass()}
-                                previewDevice={previewDevice}
                                 previewRef={previewRef}
                                 previewOuterScrollRef={previewOuterScrollRef}
-                                previewInnerScrollRef={previewInnerScrollRef}
                                 onPreviewOuterScroll={handlePreviewOuterScroll}
-                                onPreviewInnerScroll={handlePreviewInnerScroll}
                                 scrollSyncEnabled={scrollSyncEnabled}
                                 onImageClick={handleImageClick}
-                                isMobileView={false}
                             />
                         </div>
                     </div>
@@ -798,16 +656,11 @@ export default function App() {
                         <div className="w-1/2 h-full flex-shrink-0 flex flex-col overflow-hidden">
                             <PreviewPanel
                                 renderedHtml={renderedHtml}
-                                deviceWidthClass={deviceWidthClass()}
-                                previewDevice={previewDevice}
                                 previewRef={previewRef}
                                 previewOuterScrollRef={previewOuterScrollRef}
-                                previewInnerScrollRef={previewInnerScrollRef}
                                 onPreviewOuterScroll={handlePreviewOuterScroll}
-                                onPreviewInnerScroll={handlePreviewInnerScroll}
                                 scrollSyncEnabled={scrollSyncEnabled}
                                 onImageClick={handleImageClick}
-                                isMobileView={true}
                             />
                         </div>
                     </div>
@@ -827,33 +680,4 @@ export default function App() {
 
         </div>
     );
-
-    if (forceMobile) {
-        const embedUrl = new URL(window.location.href);
-        embedUrl.searchParams.delete('mobile');
-        embedUrl.searchParams.set('embed', '1');
-        return (
-            <div className="fixed inset-0 bg-[#1d1d1f] flex items-center justify-center overflow-hidden">
-                <div
-                    className="relative bg-black rounded-[44px] shadow-2xl flex-shrink-0"
-                    style={{ width: 390, height: 844, padding: 8 }}
-                >
-                    <div className="absolute top-2 left-1/2 -translate-x-1/2 w-28 h-7 bg-black rounded-b-2xl z-50" />
-                    <div
-                        className="w-full h-full rounded-[36px] overflow-hidden"
-                        style={{ background: '#fbfbfd' }}
-                    >
-                        <iframe
-                            src={embedUrl.toString()}
-                            className="block w-full h-full border-none"
-                            style={{ background: '#fbfbfd' }}
-                            allow="clipboard-write; clipboard-read"
-                        />
-                    </div>
-                </div>
-            </div>
-        );
-    }
-
-    return appContent;
 }

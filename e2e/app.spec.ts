@@ -78,21 +78,6 @@ async function scrollAndWaitForSync(
         .toBeLessThan(0.12);
 }
 
-test('keeps the copy button visible on mobile', async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto('/');
-
-    await page.getByTestId('tab-preview').click();
-    const copyButton = page.locator('[data-testid="copy-button"]:visible');
-
-    await expect(copyButton).toBeVisible();
-
-    const box = await copyButton.boundingBox();
-    expect(box).not.toBeNull();
-    expect(box!.x).toBeGreaterThanOrEqual(0);
-    expect(box!.x + box!.width).toBeLessThanOrEqual(390);
-});
-
 test('renders bold text with punctuation without leaking markdown markers', async ({ page }) => {
     await page.goto('/');
 
@@ -129,21 +114,15 @@ test('opens AI Markdown as a mobile bottom sheet from the header', async ({ page
     await expect(page.getByTestId('ai-source-text')).toBeVisible();
 });
 
-for (const device of [
-    { testId: 'device-mobile', label: 'mobile' },
-    { testId: 'device-tablet', label: 'tablet' }
-] as const) {
-    test(`syncs editor and ${device.label} preview scrolling in both directions`, async ({ page }) => {
-        await page.setViewportSize({ width: 1440, height: 900 });
-        await page.goto('/');
+test('syncs editor and PC preview scrolling in both directions', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/');
 
-        const editor = page.getByTestId('editor-input');
-        await editor.fill(buildLongMarkdown());
-        await page.locator(`[data-testid="${device.testId}"]:visible`).click();
-        await waitForScrollableArea(page, 'editor-input');
-        await waitForScrollableArea(page, 'preview-inner-scroll');
+    const editor = page.getByTestId('editor-input');
+    await editor.fill(buildLongMarkdown());
+    await waitForScrollableArea(page, 'editor-input');
+    await waitForScrollableArea(page, 'preview-outer-scroll');
 
-        await scrollAndWaitForSync(page, 'editor-input', 'preview-inner-scroll', 0.72);
-        await scrollAndWaitForSync(page, 'preview-inner-scroll', 'editor-input', 0.28);
-    });
-}
+    await scrollAndWaitForSync(page, 'editor-input', 'preview-outer-scroll', 0.72);
+    await scrollAndWaitForSync(page, 'preview-outer-scroll', 'editor-input', 0.28);
+});

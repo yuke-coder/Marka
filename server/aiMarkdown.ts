@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { ProxyAgent, setGlobalDispatcher } from 'undici';
 
 type AiMarkdownMode = 'format' | 'rewrite';
 type AiMarkdownTask = 'generate' | 'revise' | 'continue';
@@ -11,6 +12,20 @@ interface AiMarkdownBody {
 }
 
 const OPENAI_API_URL = 'https://api.openai.com/v1/responses';
+const DEFAULT_MODEL = 'gpt-5.5';
+let proxyReady = false;
+
+function readEnv(name: string) {
+    const value = process.env[name]?.trim() || '';
+    return value.replace(/^(['"])(.*)\1$/, '$2').trim();
+}
+
+function setupProxy() {
+    if (proxyReady) return;
+    proxyReady = true;
+    const proxy = readEnv('OPENAI_PROXY') || readEnv('HTTPS_PROXY') || readEnv('HTTP_PROXY');
+    if (proxy) setGlobalDispatcher(new ProxyAgent(proxy));
+}
 
 function sendJson(res: ServerResponse, status: number, data: unknown) {
     res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -20,20 +35,28 @@ function sendJson(res: ServerResponse, status: number, data: unknown) {
 async function readOpenAIError(upstream: Response) {
     const text = await upstream.text().catch(() => '');
     let code = '';
+    let type = '';
 
     try {
         const data = JSON.parse(text);
         code = typeof data?.error?.code === 'string' ? data.error.code : '';
+        type = typeof data?.error?.type === 'string' ? data.error.type : '';
     } catch {
         // Keep provider error details out of the client response.
     }
+
+    console.error('OpenAI response failed:', { status: upstream.status, code, type });
 
     if (upstream.status === 401 || code === 'invalid_api_key') {
         return 'OpenAI API Key 无效或未被当前账号接受，请重新复制或生成新的 Key 后重试';
     }
 
-    if (upstream.status === 429) {
+    if (upstream.status === 429 || code === 'rate_limit_exceeded') {
         return 'OpenAI 请求过于频繁或额度不足，请稍后重试';
+    }
+
+    if (code === 'model_not_found') {
+        return '当前 OpenAI 模型不可用，请检查 OPENAI_MODEL 环境变量';
     }
 
     return `OpenAI 请求失败（${upstream.status || 502}）`;
@@ -101,7 +124,7 @@ export async function handleAiMarkdownRequest(req: IncomingMessage, res: ServerR
         return;
     }
 
-    const apiKey = process.env.OPENAI_API_KEY;
+    const apiKey = readEnv('OPENAI_API_KEY');
     if (!apiKey) {
         sendJson(res, 500, { error: '缺少 OPENAI_API_KEY 环境变量' });
         return;
@@ -127,6 +150,7 @@ export async function handleAiMarkdownRequest(req: IncomingMessage, res: ServerR
 
     let upstream: Response;
     try {
+        setupProxy();
         upstream = await fetch(OPENAI_API_URL, {
             method: 'POST',
             headers: {
@@ -134,7 +158,7 @@ export async function handleAiMarkdownRequest(req: IncomingMessage, res: ServerR
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-                model: process.env.OPENAI_MODEL || 'gpt-5.5',
+                model: readEnv('OPENAI_MODEL') || DEFAULT_MODEL,
                 stream: true,
                 instructions: buildInstructions(mode, task),
                 input: buildInput({ mode, task, sourceText, extraInstruction }),

@@ -6,12 +6,12 @@ export default defineConfig({
     workers: process.env.CI ? 2 : undefined,
     reporter: 'list',
     use: {
-        baseURL: 'http://127.0.0.1:4173',
+        baseURL: 'http://localhost:5173',
         trace: 'on-first-retry'
     },
     webServer: {
-        command: 'pnpm exec vite --host 127.0.0.1 --port 4173 --strictPort',
-        url: 'http://127.0.0.1:4173',
+        command: 'pnpm exec vite --port 5173 --strictPort',
+        url: 'http://localhost:5173',
         reuseExistingServer: !process.env.CI,
         timeout: 120000
     },
