@@ -103,7 +103,7 @@ function MobileThemeModal({
                     >
                         {THEME_GROUPS.map((group, groupIdx) => (
                             <div key={group.label}>
-                                <div className={`flex items-center gap-2 ${groupIdx > 0 ? 'mt-4 pt-4 border-t border-[#00000010] dark:border-[#ffffff10]' : 'mt-1'}`}>
+                                <div className={`flex items-center gap-2 ${groupIdx > 0 ? 'mt-4 pt-4' : 'mt-1'}`}>
                                     <span className="text-[12px] font-semibold text-[#86868b] dark:text-[#a1a1a6] uppercase tracking-widest">{group.label}</span>
                                     <span className="text-[11px] text-[#b0b0b5] dark:text-[#666]">{group.themes.length} 款</span>
                                 </div>
@@ -244,7 +244,7 @@ function DesktopThemeDropdown({
                 >
                     {THEME_GROUPS.map((group, groupIdx) => (
                         <div key={group.label}>
-                            <div className={`flex items-center gap-2 ${groupIdx > 0 ? 'mt-4 pt-4 border-t border-[#00000010] dark:border-[#ffffff10]' : 'mt-1'}`}>
+                            <div className={`flex items-center gap-2 ${groupIdx > 0 ? 'mt-4 pt-4' : 'mt-1'}`}>
                                 <span className="text-[12px] font-semibold text-[#86868b] dark:text-[#a1a1a6] uppercase tracking-widest">{group.label}</span>
                                 <span className="text-[11px] text-[#b0b0b5] dark:text-[#666]">{group.themes.length} 款</span>
                             </div>
@@ -355,7 +355,7 @@ export default function ThemeSelector({ activeTheme, onThemeChange, mobile, comp
                 />
             </div>
 
-            <div className="hidden 2xl:flex items-center ml-1 pl-3 border-l border-[#00000010] dark:border-[#ffffff12] min-w-0">
+            <div className="hidden 2xl:flex items-center ml-1 pl-3 min-w-0">
                 <p className="text-[12px] text-[#86868b] dark:text-[#8a8a8f] font-medium tracking-wide truncate max-w-[360px]">
                     <span className="text-[#1d1d1f] dark:text-[#f5f5f7] font-semibold mr-1">{THEMES.find(t => t.id === activeTheme)?.name}</span>
                     <span className="text-[#8e8e93] dark:text-[#6c6c70]">{THEMES.find(t => t.id === activeTheme)?.description}</span>

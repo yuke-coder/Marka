@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { PenLine, Eye } from 'lucide-react';
+import { PenLine, Eye, Minimize2 } from 'lucide-react';
 import html2pdf from 'html2pdf.js';
 import { md, preprocessMarkdown, applyTheme } from './lib/markdown';
 import { markElementIndexes } from './lib/markdownIndexer';
@@ -15,6 +15,7 @@ import { DesktopToolbar, MobileToolbar } from './components/Toolbar';
 import EditorPanel from './components/EditorPanel';
 import PreviewPanel from './components/PreviewPanel';
 import Divider from './components/Divider';
+
 import CopyToast, { type Notice } from './components/CopyToast';
 import AiMarkdownDialog from './components/AiMarkdownDialog';
 import { cleanAiMarkdown, streamAiMarkdown, type AiApplyMode, type AiMarkdownRequest } from './lib/aiMarkdown';
@@ -225,6 +226,7 @@ export default function App() {
     const [hasAiGeneratedContent, setHasAiGeneratedContent] = useState(false);
     const [confirmClearEditor, setConfirmClearEditor] = useState(false);
     const [isCopying, setIsCopying] = useState(false);
+    const [isImmersive, setIsImmersive] = useState(false);
     const [previewDevice, setPreviewDevice] = useState<'mobile' | 'tablet' | 'pc'>(() =>
         embedded ? 'mobile' : loadPreviewDevice()
     );
@@ -324,6 +326,16 @@ export default function App() {
             scrollLockReleaseTimeoutRef.current = null;
         }
     }, []);
+
+    // 沉浸模式下按 ESC 退出
+    useEffect(() => {
+        if (!isImmersive) return;
+        const onKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') setIsImmersive(false);
+        };
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+    }, [isImmersive]);
 
     // 持久化中轴线位置
     useEffect(() => {
@@ -772,14 +784,21 @@ export default function App() {
     const appContent = (
         <div className="flex flex-col h-screen overflow-hidden antialiased bg-[#fbfbfd] dark:bg-black transition-colors duration-300">
 
-            <Header
-                themeMode={themeMode}
-                onToggleTheme={toggleTheme}
-                onOpenAi={() => setAiMarkdownOpen(true)}
-            />
+            {!isImmersive && (
+                <Header
+                    themeMode={themeMode}
+                    onToggleTheme={toggleTheme}
+                    onOpenAi={() => setAiMarkdownOpen(true)}
+                    isImmersive={isImmersive}
+                    onToggleImmersive={() => {
+                        setIsImmersive((prev) => !prev);
+                        setActivePanel('editor');
+                    }}
+                />
+            )}
 
             {/* 移动端 Tab 切换 - 精致 segmented control */}
-            <div className="md:hidden flex items-stretch z-[90] px-3 py-1.5">
+            {!isImmersive && <div className="md:hidden flex items-stretch z-[90] px-3 py-1.5">
                 <div className="relative flex items-center w-full bg-black/[0.04] dark:bg-white/[0.07] rounded-lg p-0.5 border border-[#0000000c] dark:border-[#ffffff12]">
                     <div
                         className="absolute top-0.5 bottom-0.5 left-0 w-[calc(50%-4px)] bg-white dark:bg-[#3a3a3c] rounded-[5px] shadow-sm"
@@ -805,10 +824,10 @@ export default function App() {
                         预览
                     </button>
                 </div>
-            </div>
+            </div>}
 
             {/* 桌面端工具栏 */}
-            <div className="glass-toolbar hidden md:flex items-center justify-between gap-2 px-2 lg:px-4 z-[90]">
+            {!isImmersive && <div className="glass-toolbar hidden md:flex items-center justify-between gap-2 px-2 lg:px-4 z-[90]">
                 <ThemeSelector activeTheme={activeTheme} onThemeChange={setActiveTheme} />
                 <DesktopToolbar
                     previewDevice={previewDevice}
@@ -822,10 +841,10 @@ export default function App() {
                     scrollSyncEnabled={scrollSyncEnabled}
                     onToggleScrollSync={() => setScrollSyncEnabled((prev) => !prev)}
                 />
-            </div>
+            </div>}
 
             {/* 移动端工具栏（仅预览Tab显示）：整行自适应，溢出时切换紧凑模式 */}
-            {activePanel === 'preview' && (
+            {!isImmersive && activePanel === 'preview' && (
                 <div ref={mobileToolbarRef} className="md:hidden glass-toolbar flex items-center px-2 py-1.5 z-[90] gap-1.5 overflow-hidden">
                     <ThemeSelector activeTheme={activeTheme} onThemeChange={setActiveTheme} mobile compact={toolbarCompact} />
                     <MobileToolbar
@@ -861,6 +880,7 @@ export default function App() {
                                 onEditorScroll={handleEditorScroll}
                                 scrollSyncEnabled={scrollSyncEnabled}
                                 onClearRequest={editorClearAction}
+                                immersive={isImmersive}
                             />
                         </div>
                         <Divider
@@ -910,6 +930,7 @@ export default function App() {
                                 scrollSyncEnabled={scrollSyncEnabled}
                                 onSelectAll={editorClearAction ? undefined : handleSelectAll}
                                 onClearRequest={editorClearAction}
+                                immersive={isImmersive}
                             />
                         </div>
                         <div className="w-1/2 h-full flex-shrink-0 flex flex-col overflow-hidden">
@@ -930,6 +951,23 @@ export default function App() {
                     </div>
                 )}
             </main>
+
+            {/* 沉浸模式：悬浮退出按钮 */}
+            {isImmersive && (
+                <motion.button
+                    initial={{ opacity: 0, y: -8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -8 }}
+                    transition={{ duration: 0.2 }}
+                    data-testid="immersive-exit"
+                    onClick={() => setIsImmersive(false)}
+                    className="fixed top-3 right-3 z-[200] inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-white/85 dark:bg-[#1c1c1e]/85 backdrop-blur-md text-[12px] font-medium text-[#1d1d1f] dark:text-white shadow-[0_4px_20px_rgba(0,0,0,0.12)] border border-black/[0.08] dark:border-white/[0.1] transition-colors hover:bg-white dark:hover:bg-[#2c2c2e] active:scale-95"
+                    title="退出沉浸编辑（ESC）"
+                >
+                    <Minimize2 size={13} />
+                    <span className="hidden sm:inline">退出沉浸</span>
+                </motion.button>
+            )}
 
             <AiMarkdownDialog
                 isOpen={aiMarkdownOpen}

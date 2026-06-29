@@ -174,11 +174,11 @@
 
 @layer utilities {
     .glass {
-        @apply bg-white/60 dark:bg-[#1c1c1e]/60 backdrop-blur-[40px] saturate-[1.8] border-b border-[#00000015] dark:border-[#ffffff15];
+        @apply bg-white/60 dark:bg-[#1c1c1e]/60 backdrop-blur-[40px] saturate-[1.8];
     }
 
     .glass-toolbar {
-        @apply bg-white/70 dark:bg-[#2c2c2e]/70 backdrop-blur-[30px] border-b border-[#00000010] dark:border-[#ffffff10];
+        @apply bg-white/70 dark:bg-[#2c2c2e]/70 backdrop-blur-[30px];
     }
 
     .glass-panel {
