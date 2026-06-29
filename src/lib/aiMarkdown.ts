@@ -16,6 +16,18 @@ export function cleanAiMarkdown(markdown: string): string {
     return next;
 }
 
+function getAiStreamError(event: any): string {
+    const error = event?.response?.error || event?.error;
+    const code = typeof error?.code === 'string' ? error.code : '';
+
+    if (code === 'insufficient_quota') return 'OpenAI 额度不足或账单未开通，请检查账户 Billing / Credits';
+    if (code === 'rate_limit_exceeded') return 'OpenAI 请求过于频繁，请稍后再试';
+    if (code === 'invalid_api_key') return 'OpenAI API Key 无效，请重新配置';
+    if (code === 'model_not_found') return '当前 OpenAI 模型不可用，请检查 OPENAI_MODEL';
+
+    return typeof error?.message === 'string' ? error.message : 'OpenAI 生成失败';
+}
+
 export async function streamAiMarkdown(
     payload: AiMarkdownRequest,
     options: {
@@ -46,6 +58,7 @@ export async function streamAiMarkdown(
     const decoder = new TextDecoder();
     let buffer = '';
     let result = '';
+    let streamError: Error | null = null;
 
     const handleEvent = (raw: string) => {
         const data = raw
@@ -61,6 +74,8 @@ export async function streamAiMarkdown(
             if (event.type === 'response.output_text.delta' && typeof event.delta === 'string') {
                 result += event.delta;
                 options.onDelta(event.delta);
+            } else if (event.type === 'response.failed' || event.type === 'response.incomplete' || event.type === 'error') {
+                streamError = new Error(getAiStreamError(event));
             }
         } catch {
             // Ignore non-JSON SSE comments or provider-side keepalive lines.
@@ -75,8 +90,10 @@ export async function streamAiMarkdown(
         const parts = buffer.split(/\n\n/);
         buffer = parts.pop() || '';
         parts.forEach(handleEvent);
+        if (streamError) throw streamError;
     }
 
     if (buffer) handleEvent(buffer);
+    if (streamError) throw streamError;
     return cleanAiMarkdown(result);
 }

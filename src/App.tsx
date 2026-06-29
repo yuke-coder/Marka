@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { PenLine, Eye } from 'lucide-react';
 import html2pdf from 'html2pdf.js';
 import { md, preprocessMarkdown, applyTheme } from './lib/markdown';
@@ -10,18 +11,38 @@ import { findImagePosition, selectTextAreaRange } from './lib/imageSelector';
 import { findElementPosition, type ElementLocation } from './lib/markdownLocator';
 import Header from './components/Header';
 import ThemeSelector from './components/ThemeSelector';
-import { DesktopToolbar } from './components/Toolbar';
+import { DesktopToolbar, MobileToolbar } from './components/Toolbar';
 import EditorPanel from './components/EditorPanel';
 import PreviewPanel from './components/PreviewPanel';
 import Divider from './components/Divider';
 import CopyToast, { type Notice } from './components/CopyToast';
 import AiMarkdownDialog from './components/AiMarkdownDialog';
-import type { AiApplyMode } from './lib/aiMarkdown';
+import { cleanAiMarkdown, streamAiMarkdown, type AiApplyMode, type AiMarkdownRequest } from './lib/aiMarkdown';
 
 const SPLIT_RATIO_STORAGE_KEY = 'marka:splitRatio';
 const SPLIT_RATIO_DEFAULT = 38.2;
-// PC 预览区所需的最小完整宽度（含外边距/内边距，避免内容被裁切）
-const PREVIEW_MIN_PX = 880;
+const PREVIEW_DEVICE_STORAGE_KEY = 'marka:previewDevice';
+const PREVIEW_DEVICE_DEFAULT: 'mobile' | 'tablet' | 'pc' = 'pc';
+
+function loadPreviewDevice(): 'mobile' | 'tablet' | 'pc' {
+    try {
+        const raw = localStorage.getItem(PREVIEW_DEVICE_STORAGE_KEY);
+        if (raw === 'mobile' || raw === 'tablet' || raw === 'pc') return raw;
+        return PREVIEW_DEVICE_DEFAULT;
+    } catch {
+        return PREVIEW_DEVICE_DEFAULT;
+    }
+}
+
+// 设备框架名义尺寸，PREVIEW_MIN_PX 和 DeviceFrame 共用此基准
+const DEVICE_FRAME = { mobile: { w: 390, h: 844 }, tablet: { w: 744, h: 1000 } } as const;
+
+// 预览区最小宽度 = 框架名义宽度 + 容器内边距余量，不再写死
+const PREVIEW_MIN_PX_BY_DEVICE: Record<'mobile' | 'tablet' | 'pc', number> = {
+    mobile: DEVICE_FRAME.mobile.w + 24,
+    tablet: DEVICE_FRAME.tablet.w + 24,
+    pc: 680,
+};
 // 编辑区最小可读宽度
 const EDITOR_MIN_PX = 280;
 
@@ -39,14 +60,15 @@ function loadSplitRatio(): number {
 }
 
 // 基于容器可用宽度计算中轴线的合法 [minRatio, maxRatio] 区间
-function computeRatioBounds(containerWidth: number): { min: number; max: number } {
+// previewMinPx 随当前预览模式变化，避免在手机/平板模式下的过度限制
+function computeRatioBounds(containerWidth: number, previewMinPx: number): { min: number; max: number } {
     if (containerWidth <= 0) return { min: SPLIT_RATIO_DEFAULT, max: SPLIT_RATIO_DEFAULT };
     const dividerWidth = 6;
     const usable = Math.max(0, containerWidth - dividerWidth);
     // 编辑区宽度 = (ratio/100) * usable >= EDITOR_MIN_PX
     const min = Math.max(0, (EDITOR_MIN_PX / usable) * 100);
-    // 预览区宽度 = ((100-ratio)/100) * usable >= PREVIEW_MIN_PX
-    const max = Math.min(100, 100 - (PREVIEW_MIN_PX / usable) * 100);
+    // 预览区宽度 = ((100-ratio)/100) * usable >= previewMinPx
+    const max = Math.min(100, 100 - (previewMinPx / usable) * 100);
     // 兜底：若容器过小不足以同时满足两端，放宽到允许编辑区更窄
     if (min > max) return { min: 0, max: 100 };
     return { min, max };
@@ -100,6 +122,14 @@ async function saveBlob(blob: Blob, filename: string, ext: string, label: string
     }
 }
 
+function isInIframe(): boolean {
+    try {
+        return typeof window !== 'undefined' && window.self !== window.top;
+    } catch {
+        return true;
+    }
+}
+
 // 剪贴板回退方案：当 Clipboard API 不可用时使用 execCommand
 function fallbackCopyText(text: string): void {
     const ta = document.createElement('textarea');
@@ -123,38 +153,111 @@ function fallbackCopyHtml(html: string): void {
     document.removeEventListener('copy', listener);
 }
 
+type AiEditorStream = { phase: 'idle' | 'connecting' | 'streaming'; chars: number };
+
+function AiEditorStreamNotice({ state }: { state: AiEditorStream }) {
+    if (state.phase === 'idle') return null;
+    const connecting = state.phase === 'connecting';
+
+    return (
+        <div className={`pointer-events-none absolute left-1/2 z-[95] -translate-x-1/2 ${connecting ? 'top-8' : 'top-4'}`}>
+            <div className={`${connecting ? 'w-[270px] flex-col px-5 pb-4 pt-4' : 'px-3 py-2'} flex items-center gap-2 rounded-md bg-white/94 text-[12px] font-medium text-[#394150] shadow-[0_10px_30px_rgba(15,23,42,0.14)] ring-1 ring-black/[0.06] backdrop-blur-md dark:bg-[#242426]/94 dark:text-[#e5e5ea] dark:ring-white/[0.08]`}>
+                {connecting ? (
+                    <>
+                        <div className="ai-atom-stage">
+                            <div className="atom-spinner">
+                                <div className="spinner-inner">
+                                    <div className="spinner-line" />
+                                    <div className="spinner-line" />
+                                    <div className="spinner-line" />
+                                    <div className="spinner-circle">&#9679;</div>
+                                </div>
+                            </div>
+                        </div>
+                        <span className="mt-1">正在连接大模型</span>
+                    </>
+                ) : (
+                    <>
+                        <span className="h-2 w-2 rounded-full bg-[#0a84ff] dark:bg-[#64aaff]" />
+                        <span>{`正在写入编辑区 · ${state.chars} 字`}</span>
+                    </>
+                )}
+            </div>
+        </div>
+    );
+}
+
+function getForceMobileMode(): boolean {
+    if (typeof window === 'undefined') return false;
+    if (isInIframe()) return false;
+    const params = new URLSearchParams(window.location.search);
+    return params.get('mobile') === '1';
+}
+
+function isEmbeddedMobileMode(): boolean {
+    if (typeof window === 'undefined') return false;
+    if (isInIframe()) return true;
+    const params = new URLSearchParams(window.location.search);
+    return params.get('embed') === '1';
+}
+
 export default function App() {
+    const forceMobile = getForceMobileMode();
+    const embedded = isEmbeddedMobileMode();
     const [themeMode, setThemeMode] = useState<'light' | 'dark'>('light');
     const [markdownInput, setMarkdownInput] = useState<string>(defaultContent);
     const [renderedHtml, setRenderedHtml] = useState<string>('');
     const [activeTheme, setActiveTheme] = useState(THEMES[0].id);
     const [notice, setNotice] = useState<Notice | null>(null);
+    const noticeIdRef = useRef(0);
     const showNotice = (
         title: string,
         description: string,
         tone: Notice['tone'],
         action?: Pick<Notice, 'actionLabel' | 'onAction'>
-    ) => setNotice({ id: Date.now(), title, description, tone, ...action });
+    ) => setNotice({ id: ++noticeIdRef.current, title, description, tone, ...action });
     const [aiMarkdownOpen, setAiMarkdownOpen] = useState(false);
+    const [aiEditorStream, setAiEditorStream] = useState<AiEditorStream>({ phase: 'idle', chars: 0 });
+    const [hasAiGeneratedContent, setHasAiGeneratedContent] = useState(false);
+    const [confirmClearEditor, setConfirmClearEditor] = useState(false);
     const [isCopying, setIsCopying] = useState(false);
-    const [activePanel, setActivePanel] = useState<'editor' | 'preview'>('editor');
+    const [previewDevice, setPreviewDevice] = useState<'mobile' | 'tablet' | 'pc'>(() =>
+        embedded ? 'mobile' : loadPreviewDevice()
+    );
+    const [activePanel, setActivePanel] = useState<'editor' | 'preview'>(embedded ? 'preview' : 'editor');
     const [scrollSyncEnabled, setScrollSyncEnabled] = useState(true);
     const [splitRatio, setSplitRatio] = useState<number>(loadSplitRatio);
     const [isDraggingDivider, setIsDraggingDivider] = useState(false);
     const [containerWidth, setContainerWidth] = useState(0);
     const [isDesktop, setIsDesktop] = useState(() =>
-        typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches
+        embedded ? false : (typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches)
     );
     const previewRef = useRef<HTMLDivElement>(null);
     const editorScrollRef = useRef<HTMLTextAreaElement>(null);
     const previewOuterScrollRef = useRef<HTMLDivElement>(null);
+    const previewInnerScrollRef = useRef<HTMLDivElement>(null);
     const mainRef = useRef<HTMLElement>(null);
+    const aiStreamAbortRef = useRef<AbortController | null>(null);
     const scrollSyncLockRef = useRef<'editor' | 'preview' | null>(null);
     const scrollLockReleaseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    const swipeRef = useRef<{ startX: number; startY: number; locked: false | 'h' | 'v' }>({ startX: 0, startY: 0, locked: false });
+    const swipeRef = useRef<{ startX: number; startY: number; locked: boolean | 'h' | 'v' }>({ startX: 0, startY: 0, locked: false });
     const [swipeDx, setSwipeDx] = useState(0);
     const [isSwiping, setIsSwiping] = useState(false);
+    const mobileToolbarRef = useRef<HTMLDivElement>(null);
+    const [toolbarCompact, setToolbarCompact] = useState(false);
+
+    // 检测移动端工具栏溢出，动态切换紧凑模式
+    useEffect(() => {
+        if (isDesktop) return;
+        const el = mobileToolbarRef.current;
+        if (!el) return;
+        const check = () => setToolbarCompact(el.scrollWidth > el.clientWidth + 1);
+        const timer = setTimeout(check, 50);
+        const ro = new ResizeObserver(check);
+        ro.observe(el);
+        return () => { clearTimeout(timer); ro.disconnect(); };
+    }, [isDesktop, activePanel, activeTheme]);
 
     const tabIndicatorX = useMemo(() => {
         const w = typeof window !== 'undefined' ? window.innerWidth : 390;
@@ -221,13 +324,40 @@ export default function App() {
         }
     }, [splitRatio]);
 
-    // 跟踪桌面端断点，控制桌面/移动端布局切换
+    // 持久化预览设备模式
     useEffect(() => {
+        try {
+            localStorage.setItem(PREVIEW_DEVICE_STORAGE_KEY, previewDevice);
+        } catch {
+            // ignore quota / privacy errors
+        }
+    }, [previewDevice]);
+
+    // 主动请求剪贴板权限，确保复制功能在任何情况下都可用
+    useEffect(() => {
+        if (typeof navigator !== 'undefined' && navigator.permissions) {
+            navigator.permissions.query({ name: 'clipboard-write' as PermissionName })
+                .catch(() => { /* 部分浏览器不支持，忽略 */ });
+            navigator.permissions.query({ name: 'clipboard-read' as PermissionName })
+                .catch(() => { /* 部分浏览器不支持，忽略 */ });
+        }
+    }, []);
+
+    // 移动端视图下强制使用手机预览模式
+    useEffect(() => {
+        if (embedded && previewDevice !== 'mobile') {
+            setPreviewDevice('mobile');
+        }
+    }, [embedded, previewDevice]);
+
+    // 跟踪桌面端断点，用于在移动端隐藏分隔条
+    useEffect(() => {
+        if (embedded) return;
         const mq = window.matchMedia('(min-width: 768px)');
         const handler = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
         mq.addEventListener('change', handler);
         return () => mq.removeEventListener('change', handler);
-    }, []);
+    }, [embedded]);
 
     // 监听 main 容器实际宽度，用于动态计算中轴线可拖拽边界
     // 确保预览区在任何模式下都能完整显示（不被裁切）
@@ -238,11 +368,16 @@ export default function App() {
         update();
         const ro = new ResizeObserver(update);
         ro.observe(el);
-        return () => ro.disconnect();
+        window.addEventListener('resize', update);
+        return () => {
+            ro.disconnect();
+            window.removeEventListener('resize', update);
+        };
     }, []);
 
-    // 基于当前容器宽度计算动态边界
-    const ratioBounds = computeRatioBounds(containerWidth);
+    // 基于当前容器宽度与预览模式计算动态边界
+    const previewMinPx = PREVIEW_MIN_PX_BY_DEVICE[previewDevice];
+    const ratioBounds = computeRatioBounds(containerWidth, previewMinPx);
 
     // 容器宽度变化（如窗口缩放）时，若已保存的 ratio 越界则自动收回
     // 初始化阶段 containerWidth 为 0，ratioBounds 为默认值 {DEFAULT,DEFAULT}，
@@ -263,7 +398,7 @@ export default function App() {
 
         const rect = mainRef.current.getBoundingClientRect();
         // 拖拽开始时锁定本次的边界，避免拖拽中容器宽度抖动
-        const bounds = computeRatioBounds(rect.width);
+        const bounds = computeRatioBounds(rect.width, PREVIEW_MIN_PX_BY_DEVICE[previewDevice]);
 
         const applyClientX = (clientX: number) => {
             const x = clientX - rect.left;
@@ -284,7 +419,7 @@ export default function App() {
         window.addEventListener('pointermove', onMove);
         window.addEventListener('pointerup', onUp);
         window.addEventListener('pointercancel', onUp);
-    }, []);
+    }, [previewDevice]);
 
     const toggleTheme = () => {
         setThemeMode((prev) => {
@@ -297,6 +432,7 @@ export default function App() {
 
     const applyAiMarkdown = (markdown: string, mode: AiApplyMode) => {
         const previous = markdownInput;
+        const previousAiState = hasAiGeneratedContent;
         let next = markdown;
         let cursorPos: number | null = null;
         const textarea = editorScrollRef.current;
@@ -311,6 +447,7 @@ export default function App() {
         }
 
         setMarkdownInput(next);
+        setHasAiGeneratedContent(Boolean(next.trim()));
 
         if (cursorPos !== null && textarea) {
             setTimeout(() => {
@@ -324,10 +461,69 @@ export default function App() {
             actionLabel: '撤销',
             onAction: () => {
                 setMarkdownInput(previous);
+                setHasAiGeneratedContent(previousAiState);
                 showNotice('已撤销', '已恢复 AI 应用前的内容', 'success');
             },
         });
     };
+
+    const streamReplaceAiMarkdown = useCallback(async (request: AiMarkdownRequest) => {
+        aiStreamAbortRef.current?.abort();
+        const controller = new AbortController();
+        const previous = markdownInput;
+        const previousAiState = hasAiGeneratedContent;
+        let streamed = '';
+
+        aiStreamAbortRef.current = controller;
+        setAiMarkdownOpen(false);
+        setActivePanel('editor');
+        setMarkdownInput('');
+        setHasAiGeneratedContent(false);
+        setAiEditorStream({ phase: 'connecting', chars: 0 });
+
+        try {
+            const markdown = await streamAiMarkdown(request, {
+                signal: controller.signal,
+                onDelta: (delta) => {
+                    streamed += delta;
+                    setMarkdownInput(streamed);
+                    setAiEditorStream({ phase: 'streaming', chars: streamed.length });
+                },
+            });
+            const cleaned = cleanAiMarkdown(markdown || streamed);
+            if (!cleaned) throw new Error('模型没有返回 Markdown 内容');
+
+            setMarkdownInput(cleaned);
+            setHasAiGeneratedContent(true);
+            setAiEditorStream({ phase: 'idle', chars: cleaned.length });
+            showNotice('AI Markdown 已应用', '已替换当前内容', 'success', {
+                actionLabel: '撤销',
+                onAction: () => {
+                    setMarkdownInput(previous);
+                    setHasAiGeneratedContent(previousAiState);
+                    showNotice('已撤销', '已恢复 AI 应用前的内容', 'success');
+                },
+            });
+        } catch (err) {
+            if (err instanceof DOMException && err.name === 'AbortError') return;
+            setMarkdownInput(previous);
+            setHasAiGeneratedContent(previousAiState);
+            setAiEditorStream({ phase: 'idle', chars: 0 });
+            showNotice('生成失败', err instanceof Error ? err.message : 'AI 生成失败，请稍后重试', 'error');
+        } finally {
+            if (aiStreamAbortRef.current === controller) aiStreamAbortRef.current = null;
+        }
+    }, [hasAiGeneratedContent, markdownInput, showNotice]);
+
+    const requestClearEditor = useCallback(() => setConfirmClearEditor(true), []);
+
+    const confirmClearEditorContent = useCallback(() => {
+        setMarkdownInput('');
+        setHasAiGeneratedContent(false);
+        setConfirmClearEditor(false);
+        editorScrollRef.current?.focus();
+        showNotice('已清除', '编辑区内容已清空', 'success');
+    }, [showNotice]);
 
     useEffect(() => {
         // Core rendering: markdown → HTML → styled HTML
@@ -346,8 +542,17 @@ export default function App() {
     }, [scrollSyncEnabled, resetScrollSyncLock]);
 
     useEffect(() => {
+        resetScrollSyncLock();
+    }, [previewDevice, resetScrollSyncLock]);
+
+    useEffect(() => {
         return () => resetScrollSyncLock();
     }, [resetScrollSyncLock]);
+
+    const getActivePreviewScrollElement = () => {
+        if (previewDevice === 'pc' || !isDesktop) return previewOuterScrollRef.current;
+        return previewInnerScrollRef.current;
+    };
 
     const syncScrollPosition = (
         sourceElement: HTMLElement,
@@ -382,13 +587,22 @@ export default function App() {
 
     const handleEditorScroll = () => {
         const editorElement = editorScrollRef.current;
-        const previewElement = previewOuterScrollRef.current;
+        const previewElement = getActivePreviewScrollElement();
         if (!editorElement || !previewElement) return;
         syncScrollPosition(editorElement, previewElement, 'editor');
     };
 
     const handlePreviewOuterScroll = () => {
+        if (previewDevice !== 'pc' && isDesktop) return;
         const previewElement = previewOuterScrollRef.current;
+        const editorElement = editorScrollRef.current;
+        if (!previewElement || !editorElement) return;
+        syncScrollPosition(previewElement, editorElement, 'preview');
+    };
+
+    const handlePreviewInnerScroll = () => {
+        if (previewDevice === 'pc' || !isDesktop) return;
+        const previewElement = previewInnerScrollRef.current;
         const editorElement = editorScrollRef.current;
         if (!previewElement || !editorElement) return;
         syncScrollPosition(previewElement, editorElement, 'preview');
@@ -400,6 +614,8 @@ export default function App() {
         textarea.focus();
         textarea.select();
     }, []);
+
+    const editorClearAction = hasAiGeneratedContent && markdownInput.trim().length > 0 ? requestClearEditor : undefined;
 
     const handleCopy = async () => {
         if (!previewRef.current) return;
@@ -423,7 +639,7 @@ export default function App() {
             showNotice('排版已复制', '可直接粘贴到公众号编辑器', 'success');
         } catch (err) {
             console.error('Copy failed', err);
-            showNotice('复制失败', '请检查浏览器剪贴板权限', 'error');
+            alert('复制格式失败，请检查浏览器剪贴板权限');
         } finally {
             setIsCopying(false);
         }
@@ -527,6 +743,12 @@ export default function App() {
         }
     }, [markdownInput, activePanel]);
 
+    const deviceWidthClass = () => {
+        if (previewDevice === 'mobile') return 'max-w-[520px] w-full';
+        if (previewDevice === 'tablet') return 'max-w-[800px] w-full';
+        return 'max-w-[840px] xl:max-w-[1024px] w-full';
+    };
+
     // 中轴线动态分栏：编辑区 fr / 分隔条 / 预览区 fr
     // 渲染时再次钳制到当前容器边界，防止状态未及时更新导致预览区被压缩到裁切
     // 容器宽度未就绪时直接使用保存值，避免初次渲染误钳制为默认值产生闪烁
@@ -537,7 +759,7 @@ export default function App() {
             : '1fr',
     };
 
-    return (
+    const appContent = (
         <div className="flex flex-col h-screen overflow-hidden antialiased bg-[#fbfbfd] dark:bg-black transition-colors duration-300">
 
             <Header
@@ -579,6 +801,8 @@ export default function App() {
             <div className="glass-toolbar hidden md:flex items-center justify-between gap-2 px-2 lg:px-4 z-[90]">
                 <ThemeSelector activeTheme={activeTheme} onThemeChange={setActiveTheme} />
                 <DesktopToolbar
+                    previewDevice={previewDevice}
+                    onDeviceChange={setPreviewDevice}
                     onExportPdf={handleExportPdf}
                     onExportHtml={handleExportHtml}
                     onExportMarkdown={handleExportMarkdown}
@@ -590,11 +814,29 @@ export default function App() {
                 />
             </div>
 
+            {/* 移动端工具栏（仅预览Tab显示）：整行自适应，溢出时切换紧凑模式 */}
+            {activePanel === 'preview' && (
+                <div ref={mobileToolbarRef} className="md:hidden glass-toolbar flex items-center px-2 py-1.5 z-[90] gap-1.5 overflow-hidden">
+                    <ThemeSelector activeTheme={activeTheme} onThemeChange={setActiveTheme} mobile compact={toolbarCompact} />
+                    <MobileToolbar
+                        onExportPdf={handleExportPdf}
+                        onExportHtml={handleExportHtml}
+                        onExportMarkdown={handleExportMarkdown}
+                        onCopy={handleCopy}
+                        onCopyMarkdown={handleCopyMarkdown}
+                        isCopying={isCopying}
+                        compact={toolbarCompact}
+                    />
+                </div>
+            )}
+
             {/* 编辑区 & 预览区 */}
             <main
                 ref={mainRef}
-                className="flex-1 overflow-hidden relative"
+                className={`flex-1 overflow-hidden relative ${isDesktop ? '' : ''}`}
             >
+                <AiEditorStreamNotice state={aiEditorStream} />
+
                 {/* 桌面端：左右分栏 */}
                 {isDesktop && (
                     <div
@@ -608,6 +850,7 @@ export default function App() {
                                 editorScrollRef={editorScrollRef}
                                 onEditorScroll={handleEditorScroll}
                                 scrollSyncEnabled={scrollSyncEnabled}
+                                onClearRequest={editorClearAction}
                             />
                         </div>
                         <Divider
@@ -620,11 +863,16 @@ export default function App() {
                         <div className="flex flex-col overflow-hidden">
                             <PreviewPanel
                                 renderedHtml={renderedHtml}
+                                deviceWidthClass={deviceWidthClass()}
+                                previewDevice={previewDevice}
                                 previewRef={previewRef}
                                 previewOuterScrollRef={previewOuterScrollRef}
+                                previewInnerScrollRef={previewInnerScrollRef}
                                 onPreviewOuterScroll={handlePreviewOuterScroll}
+                                onPreviewInnerScroll={handlePreviewInnerScroll}
                                 scrollSyncEnabled={scrollSyncEnabled}
                                 onImageClick={handleImageClick}
+                                isMobileView={false}
                             />
                         </div>
                     </div>
@@ -650,17 +898,23 @@ export default function App() {
                                 editorScrollRef={editorScrollRef}
                                 onEditorScroll={handleEditorScroll}
                                 scrollSyncEnabled={scrollSyncEnabled}
-                                onSelectAll={handleSelectAll}
+                                onSelectAll={editorClearAction ? undefined : handleSelectAll}
+                                onClearRequest={editorClearAction}
                             />
                         </div>
                         <div className="w-1/2 h-full flex-shrink-0 flex flex-col overflow-hidden">
                             <PreviewPanel
                                 renderedHtml={renderedHtml}
+                                deviceWidthClass={deviceWidthClass()}
+                                previewDevice={previewDevice}
                                 previewRef={previewRef}
                                 previewOuterScrollRef={previewOuterScrollRef}
+                                previewInnerScrollRef={previewInnerScrollRef}
                                 onPreviewOuterScroll={handlePreviewOuterScroll}
+                                onPreviewInnerScroll={handlePreviewInnerScroll}
                                 scrollSyncEnabled={scrollSyncEnabled}
                                 onImageClick={handleImageClick}
+                                isMobileView={true}
                             />
                         </div>
                     </div>
@@ -673,11 +927,82 @@ export default function App() {
                 currentMarkdown={markdownInput}
                 onClose={() => setAiMarkdownOpen(false)}
                 onApply={applyAiMarkdown}
+                onStreamReplace={(request) => void streamReplaceAiMarkdown(request)}
                 showNotice={showNotice}
             />
+
+            <AnimatePresence>
+                {confirmClearEditor && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-[340] grid place-items-center bg-black/30 px-5 backdrop-blur-[2px] dark:bg-black/50"
+                    >
+                        <motion.div
+                            initial={{ opacity: 0, y: 8, scale: 0.98 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: 8, scale: 0.98 }}
+                            transition={{ duration: 0.16 }}
+                            className="w-full max-w-[340px] rounded-lg bg-white p-4 shadow-[0_18px_50px_rgba(15,23,42,0.24)] dark:bg-[#242426]"
+                            role="dialog"
+                            aria-modal="true"
+                            aria-labelledby="clear-editor-title"
+                        >
+                            <h3 id="clear-editor-title" className="text-[15px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7]">清除编辑区内容？</h3>
+                            <p className="mt-2 text-[13px] leading-5 text-[#69707d] dark:text-[#a1a1a6]">
+                                当前编辑区内容会被清空，此操作不会自动恢复。
+                            </p>
+                            <div className="mt-4 flex justify-end gap-2">
+                                <button
+                                    onClick={() => setConfirmClearEditor(false)}
+                                    className="inline-flex h-8 items-center justify-center rounded-md bg-[#eef0f4] px-3 text-[12px] font-medium text-[#4b5563] transition-colors hover:bg-[#e4e7ec] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 dark:bg-[#2c2c2e] dark:text-[#d1d1d6] dark:hover:bg-[#3a3a3c]"
+                                >
+                                    取消
+                                </button>
+                                <button
+                                    onClick={confirmClearEditorContent}
+                                    className="inline-flex h-8 items-center justify-center rounded-md bg-[#d70015] px-3.5 text-[12px] font-semibold text-white transition-colors hover:bg-[#b80012] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d70015]/30 dark:bg-[#ff6961] dark:text-black dark:hover:bg-[#ff7b73]"
+                                >
+                                    确认清除
+                                </button>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             <CopyToast notice={notice} onClose={() => setNotice(null)} />
 
         </div>
     );
+
+    if (forceMobile) {
+        const embedUrl = new URL(window.location.href);
+        embedUrl.searchParams.delete('mobile');
+        embedUrl.searchParams.set('embed', '1');
+        return (
+            <div className="fixed inset-0 bg-[#1d1d1f] flex items-center justify-center overflow-hidden">
+                <div
+                    className="relative bg-black rounded-[44px] shadow-2xl flex-shrink-0"
+                    style={{ width: 390, height: 844, padding: 8 }}
+                >
+                    <div className="absolute top-2 left-1/2 -translate-x-1/2 w-28 h-7 bg-black rounded-b-2xl z-50" />
+                    <div
+                        className="w-full h-full rounded-[36px] overflow-hidden"
+                        style={{ background: '#fbfbfd' }}
+                    >
+                        <iframe
+                            src={embedUrl.toString()}
+                            className="block w-full h-full border-none"
+                            style={{ background: '#fbfbfd' }}
+                            allow="clipboard-write; clipboard-read"
+                        />
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    return appContent;
 }

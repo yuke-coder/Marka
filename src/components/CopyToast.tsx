@@ -91,18 +91,20 @@ export default function CopyToast({ notice, onClose, duration = 3000 }: CopyToas
                         </motion.div>
                         <div className="min-w-0 flex-1">
                             <p className="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7]">{notice.title}</p>
-                            <p className="mt-0.5 text-xs text-[#86868b] dark:text-[#a1a1a6]">{notice.description}</p>
-                            {notice.actionLabel && notice.onAction && (
-                                <button
-                                    onClick={() => {
-                                        notice.onAction?.();
-                                        onClose();
-                                    }}
-                                    className="mt-2 h-7 rounded-md border border-[#00000012] dark:border-[#ffffff16] px-2.5 text-[12px] font-medium text-[#0066cc] dark:text-[#0a84ff] transition-colors hover:bg-[#0066cc]/8 dark:hover:bg-[#0a84ff]/10"
-                                >
-                                    {notice.actionLabel}
-                                </button>
-                            )}
+                            <div className="mt-0.5 flex min-w-0 items-center gap-2">
+                                <p className="min-w-0 truncate text-xs text-[#86868b] dark:text-[#a1a1a6]">{notice.description}</p>
+                                {notice.actionLabel && notice.onAction && (
+                                    <button
+                                        onClick={() => {
+                                            notice.onAction?.();
+                                            onClose();
+                                        }}
+                                        className="shrink-0 whitespace-nowrap rounded-md px-1.5 py-0.5 text-[12px] font-medium text-[#0066cc] transition-colors hover:bg-[#0066cc]/8 dark:text-[#0a84ff] dark:hover:bg-[#0a84ff]/10"
+                                    >
+                                        {notice.actionLabel}
+                                    </button>
+                                )}
+                            </div>
                         </div>
                         <button
                             onClick={onClose}

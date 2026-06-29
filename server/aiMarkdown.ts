@@ -86,35 +86,39 @@ function readJson(req: IncomingMessage): Promise<AiMarkdownBody> {
 
 function buildInstructions(mode: AiMarkdownMode, task: AiMarkdownTask) {
     const base = [
-        '你是 Marka 的 Markdown 排版助手。',
-        '只输出可直接填入 Markdown 编辑器的 Markdown 源码。',
-        '不要输出解释、寒暄、JSON、HTML 或 ```markdown 包裹。',
-        '不得编造事实，不得加入原文没有的新信息。',
+        'You are the Markdown transformation engine inside Marka, a focused editor for turning plain text into clean, publish-ready Markdown.',
+        'Return only raw Markdown source that can be inserted directly into the editor.',
+        'Do not include explanations, greetings, analysis, JSON, HTML, or wrapping code fences such as ```markdown.',
+        'Do not invent facts, claims, data, links, names, dates, examples, or conclusions that are not present in the user-provided text.',
+        'Keep the output in the same language as the source text unless the user explicitly asks for another language.',
+        'Use Markdown features intentionally: headings, lists, emphasis, blockquotes, tables, task lists, and code fences only when the source content naturally supports them.',
+        'Prefer readable structure over decoration. Avoid excessive bold text, unnecessary tables, and noisy formatting.',
+        'Follow the user\'s extra requirements unless they conflict with factual preservation, Markdown-only output, or the selected mode.',
     ];
 
     if (task === 'continue') {
-        base.push('用户会提供一份已经生成到一半的 Markdown，请从末尾自然继续，只输出后续 Markdown 片段，不要重复已有内容。');
+        base.push('Task: continue an existing partial Markdown result. Start naturally from the end of the provided content, output only the continuation fragment, and do not repeat existing text.');
     } else if (task === 'revise') {
-        base.push('用户会提供一份已有 Markdown，请根据继续要求优化它，并返回完整的新 Markdown。');
+        base.push('Task: revise an existing Markdown document according to the user\'s follow-up request. Return the complete revised Markdown document.');
     } else {
-        base.push('用户会提供纯文本，请把它转换成结构清晰、格式丰富的 Markdown。');
+        base.push('Task: convert the provided plain text into clear, well-structured, richly formatted Markdown.');
     }
 
     if (mode === 'format') {
-        base.push('当前是排版模式：完全保留原文内容，只做结构整理、Markdown 化和排版增强；不得删减、扩写、改写或总结。');
+        base.push('Mode: formatting. Preserve the original content, wording, meaning, order, and level of detail. Only organize structure, convert to Markdown, and improve layout. Do not delete, expand, rewrite, summarize, or reinterpret the source.');
     } else {
-        base.push('当前是改写模式：可以按用户要求调整表达、语气和结构，但必须保留原文事实，不能编造。');
+        base.push('Mode: rewriting. You may improve wording, tone, flow, and structure according to the user\'s requirements, but you must preserve all original facts and intent. If a fact is unclear, keep the original wording rather than guessing.');
     }
 
     return base.join('\n');
 }
 
 function buildInput(body: Required<AiMarkdownBody>) {
-    const label = body.task === 'revise' ? '当前 Markdown 源码' : body.task === 'continue' ? '已生成的 Markdown 片段' : '原始纯文本';
-    const instruction = body.extraInstruction.trim() || '无额外要求';
+    const label = body.task === 'revise' ? 'Current Markdown source' : body.task === 'continue' ? 'Existing partial Markdown' : 'Source plain text';
+    const instruction = body.extraInstruction.trim() || 'No additional requirements.';
     return [
-        `用户额外要求：\n---\n${instruction}\n---`,
-        `${label}：\n---\n${body.sourceText.trim()}\n---`,
+        `Additional user requirements:\n---\n${instruction}\n---`,
+        `${label}:\n---\n${body.sourceText.trim()}\n---`,
     ].join('\n\n');
 }
 
