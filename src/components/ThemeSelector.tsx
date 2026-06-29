@@ -319,7 +319,7 @@ export default function ThemeSelector({ activeTheme, onThemeChange, mobile, comp
     const isInDropdown = !pillThemes.some(theme => theme.id === activeTheme);
 
     return (
-        <div className="flex items-center gap-2 px-3 lg:px-4 py-2 min-w-0 shrink-0">
+        <div className="flex items-center gap-2 px-3 lg:px-4 py-0.5 min-w-0 shrink-0">
             <div className={segWrap} role="group" aria-label="排版风格">
                 {pillThemes.map(theme => (
                     <button

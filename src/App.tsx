@@ -15,6 +15,7 @@ import { DesktopToolbar, MobileToolbar } from './components/Toolbar';
 import EditorPanel from './components/EditorPanel';
 import PreviewPanel from './components/PreviewPanel';
 import Divider from './components/Divider';
+import { DEVICE_FRAME_PADDING, DEVICE_FRAME_SIZE } from './components/DeviceFrame';
 
 import CopyToast, { type Notice } from './components/CopyToast';
 import AiMarkdownDialog from './components/AiMarkdownDialog';
@@ -39,13 +40,10 @@ function loadPreviewDevice(): 'mobile' | 'tablet' | 'pc' {
     }
 }
 
-// 设备框架名义尺寸，PREVIEW_MIN_PX 和 DeviceFrame 共用此基准
-const DEVICE_FRAME = { mobile: { w: 390, h: 844 }, tablet: { w: 744, h: 1000 } } as const;
-
-// 预览区最小宽度 = 框架名义宽度 + 容器内边距余量，不再写死
+// 手机和平板预览会等比缩放，这里只限制可用下限，避免中轴线拖动范围被设备名义宽度锁死。
 const PREVIEW_MIN_PX_BY_DEVICE: Record<'mobile' | 'tablet' | 'pc', number> = {
-    mobile: DEVICE_FRAME.mobile.w + 24,
-    tablet: DEVICE_FRAME.tablet.w + 24,
+    mobile: 280,
+    tablet: 420,
     pc: 680,
 };
 // 编辑区最小可读宽度
@@ -158,11 +156,17 @@ function fallbackCopyHtml(html: string): void {
     document.removeEventListener('copy', listener);
 }
 
-type AiEditorStream = { phase: 'idle' | 'connecting' | 'streaming'; chars: number };
+type AiEditorStream = { phase: 'idle' | 'connecting' | 'thinking' | 'streaming'; chars: number; connectionMs?: number };
+
+function formatAiConnectionTime(ms?: number) {
+    if (typeof ms !== 'number') return '';
+    return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
+}
 
 function AiEditorStreamNotice({ state }: { state: AiEditorStream }) {
     if (state.phase === 'idle') return null;
     const connecting = state.phase === 'connecting';
+    const thinking = state.phase === 'thinking';
 
     return (
         <div className={`pointer-events-none absolute left-1/2 z-[95] -translate-x-1/2 ${connecting ? 'top-8' : 'top-4'}`}>
@@ -180,6 +184,11 @@ function AiEditorStreamNotice({ state }: { state: AiEditorStream }) {
                             </div>
                         </div>
                         <span className="mt-1">正在连接大模型</span>
+                    </>
+                ) : thinking ? (
+                    <>
+                        <span className="h-2 w-2 rounded-full bg-[#0a84ff] dark:bg-[#64aaff]" />
+                        <span>{`已连接模型 · ${formatAiConnectionTime(state.connectionMs)} · 正在思考`}</span>
                     </>
                 ) : (
                     <>
@@ -223,6 +232,8 @@ export default function App() {
     ) => setNotice({ id: ++noticeIdRef.current, title, description, tone, ...action });
     const [aiMarkdownOpen, setAiMarkdownOpen] = useState(false);
     const [aiEditorStream, setAiEditorStream] = useState<AiEditorStream>({ phase: 'idle', chars: 0 });
+    const [lastAiRequest, setLastAiRequest] = useState<AiMarkdownRequest | null>(null);
+    const [aiStreamInterrupted, setAiStreamInterrupted] = useState(false);
     const [hasAiGeneratedContent, setHasAiGeneratedContent] = useState(false);
     const [confirmClearEditor, setConfirmClearEditor] = useState(false);
     const [isCopying, setIsCopying] = useState(false);
@@ -497,6 +508,8 @@ export default function App() {
         let streamed = '';
 
         aiStreamAbortRef.current = controller;
+        setLastAiRequest(request);
+        setAiStreamInterrupted(false);
         setAiMarkdownOpen(false);
         setActivePanel('editor');
         setMarkdownInput('');
@@ -506,6 +519,9 @@ export default function App() {
         try {
             const markdown = await streamAiMarkdown(request, {
                 signal: controller.signal,
+                onConnected: (connectionMs) => {
+                    setAiEditorStream({ phase: 'thinking', chars: 0, connectionMs });
+                },
                 onDelta: (delta) => {
                     streamed += delta;
                     setMarkdownInput(streamed);
@@ -523,13 +539,21 @@ export default function App() {
                 onAction: () => {
                     setMarkdownInput(previous);
                     setHasAiGeneratedContent(previousAiState);
+                    setAiStreamInterrupted(false);
+                    setLastAiRequest(null);
                     showNotice('已撤销', '已恢复 AI 应用前的内容', 'success');
                 },
             });
         } catch (err) {
-            if (err instanceof DOMException && err.name === 'AbortError') return;
+            if (err instanceof DOMException && err.name === 'AbortError') {
+                setAiEditorStream({ phase: 'idle', chars: 0 });
+                setHasAiGeneratedContent(Boolean(streamed.trim()));
+                setAiStreamInterrupted(true);
+                return;
+            }
             setMarkdownInput(previous);
             setHasAiGeneratedContent(previousAiState);
+            setAiStreamInterrupted(false);
             setAiEditorStream({ phase: 'idle', chars: 0 });
             showNotice('生成失败', err instanceof Error ? err.message : 'AI 生成失败，请稍后重试', 'error');
         } finally {
@@ -637,7 +661,17 @@ export default function App() {
         textarea.select();
     }, []);
 
-    const editorClearAction = hasAiGeneratedContent && markdownInput.trim().length > 0 ? requestClearEditor : undefined;
+    const abortAiStream = useCallback(() => {
+        aiStreamAbortRef.current?.abort();
+    }, []);
+
+    const regenerateAiStream = useCallback(() => {
+        if (lastAiRequest) void streamReplaceAiMarkdown(lastAiRequest);
+    }, [lastAiRequest]);
+
+    const isAiStreaming = aiEditorStream.phase !== 'idle';
+    const editorClearAction = !isAiStreaming && hasAiGeneratedContent && markdownInput.trim().length > 0 ? requestClearEditor : undefined;
+    const canRegenerateStream = !isAiStreaming && aiStreamInterrupted && lastAiRequest !== null;
 
     const handleCopy = async () => {
         if (!previewRef.current) return;
@@ -798,7 +832,7 @@ export default function App() {
             )}
 
             {/* 移动端 Tab 切换 - 精致 segmented control */}
-            {!isImmersive && <div className="md:hidden flex items-stretch z-[90] px-3 py-1.5">
+            {!isImmersive && <div className="md:hidden flex items-stretch z-[90] px-3 py-1">
                 <div className="relative flex items-center w-full bg-black/[0.04] dark:bg-white/[0.07] rounded-lg p-0.5 border border-[#0000000c] dark:border-[#ffffff12]">
                     <div
                         className="absolute top-0.5 bottom-0.5 left-0 w-[calc(50%-4px)] bg-white dark:bg-[#3a3a3c] rounded-[5px] shadow-sm"
@@ -845,7 +879,7 @@ export default function App() {
 
             {/* 移动端工具栏（仅预览Tab显示）：整行自适应，溢出时切换紧凑模式 */}
             {!isImmersive && activePanel === 'preview' && (
-                <div ref={mobileToolbarRef} className="md:hidden glass-toolbar flex items-center px-2 py-1.5 z-[90] gap-1.5 overflow-hidden">
+                <div ref={mobileToolbarRef} className="md:hidden glass-toolbar flex items-center px-2 py-1 z-[90] gap-1.5 overflow-hidden">
                     <ThemeSelector activeTheme={activeTheme} onThemeChange={setActiveTheme} mobile compact={toolbarCompact} />
                     <MobileToolbar
                         onExportPdf={handleExportPdf}
@@ -869,7 +903,7 @@ export default function App() {
                 {/* 桌面端：左右分栏 */}
                 {isDesktop && (
                     <div
-                        className={`w-full h-full grid ${isDraggingDivider ? '' : 'transition-all duration-500'}`}
+                        className="w-full h-full grid"
                         style={mainGridStyle}
                     >
                         <div className="flex flex-col overflow-hidden">
@@ -880,6 +914,9 @@ export default function App() {
                                 onEditorScroll={handleEditorScroll}
                                 scrollSyncEnabled={scrollSyncEnabled}
                                 onClearRequest={editorClearAction}
+                                onAbortStream={isAiStreaming ? abortAiStream : undefined}
+                                onRegenerateStream={canRegenerateStream ? regenerateAiStream : undefined}
+                                thinkingConnectionMs={aiEditorStream.phase === 'thinking' ? aiEditorStream.connectionMs : undefined}
                                 immersive={isImmersive}
                             />
                         </div>
@@ -928,8 +965,11 @@ export default function App() {
                                 editorScrollRef={editorScrollRef}
                                 onEditorScroll={handleEditorScroll}
                                 scrollSyncEnabled={scrollSyncEnabled}
-                                onSelectAll={editorClearAction ? undefined : handleSelectAll}
+                                onSelectAll={isAiStreaming || editorClearAction || canRegenerateStream ? undefined : handleSelectAll}
                                 onClearRequest={editorClearAction}
+                                onAbortStream={isAiStreaming ? abortAiStream : undefined}
+                                onRegenerateStream={canRegenerateStream ? regenerateAiStream : undefined}
+                                thinkingConnectionMs={aiEditorStream.phase === 'thinking' ? aiEditorStream.connectionMs : undefined}
                                 immersive={isImmersive}
                             />
                         </div>
@@ -1029,11 +1069,17 @@ export default function App() {
         const embedUrl = new URL(window.location.href);
         embedUrl.searchParams.delete('mobile');
         embedUrl.searchParams.set('embed', '1');
+        const mobileScreen = DEVICE_FRAME_SIZE.mobile;
+        const mobilePadding = DEVICE_FRAME_PADDING.mobile;
         return (
             <div className="fixed inset-0 bg-[#1d1d1f] flex items-center justify-center overflow-hidden">
                 <div
                     className="relative bg-black rounded-[44px] shadow-2xl flex-shrink-0"
-                    style={{ width: 390, height: 844, padding: 8 }}
+                    style={{
+                        width: mobileScreen.width + mobilePadding * 2,
+                        height: mobileScreen.height + mobilePadding * 2,
+                        padding: mobilePadding,
+                    }}
                 >
                     <div className="absolute top-2 left-1/2 -translate-x-1/2 w-28 h-7 bg-black rounded-b-2xl z-50" />
                     <div

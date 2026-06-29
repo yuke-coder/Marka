@@ -37,7 +37,7 @@ export default function Header({ themeMode, onToggleTheme, onOpenAi, isImmersive
     const { date, time } = formatDateTime(now);
 
     return (
-        <header className="glass flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 sticky top-0 z-[100]">
+        <header className="glass flex items-center justify-between px-4 sm:px-6 py-1.5 sm:py-2 sticky top-0 z-[100]">
             <div className="flex items-center gap-3">
                 <span className="grid h-8 w-8 place-items-center rounded-md bg-white dark:bg-white">
                     <img

@@ -1,9 +1,48 @@
 export type AiMarkdownMode = 'format' | 'rewrite';
 export type AiApplyMode = 'replace' | 'insert' | 'append';
 export type AiMarkdownTask = 'generate' | 'revise' | 'continue';
+export type AiMarkdownModel =
+    | 'gpt-5.5'
+    | 'gpt-5.5-pro'
+    | 'gpt-5.4'
+    | 'gpt-5.4-pro'
+    | 'gpt-5.4-mini'
+    | 'gpt-5.4-nano'
+    | 'gpt-5.3-codex-spark';
+export type AiReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
+export type AiMarkdownSpeed = 'standard' | 'fast';
+
+export const DEFAULT_AI_MARKDOWN_MODEL: AiMarkdownModel = 'gpt-5.4-nano';
+export const DEFAULT_AI_REASONING_EFFORT: AiReasoningEffort = 'low';
+export const DEFAULT_AI_MARKDOWN_SPEED: AiMarkdownSpeed = 'standard';
+
+export const aiMarkdownModels: Array<{ id: AiMarkdownModel; label: string; shortLabel: string }> = [
+    { id: 'gpt-5.5', label: 'GPT-5.5', shortLabel: '5.5' },
+    { id: 'gpt-5.5-pro', label: 'GPT-5.5 Pro', shortLabel: '5.5 Pro' },
+    { id: 'gpt-5.4', label: 'GPT-5.4', shortLabel: '5.4' },
+    { id: 'gpt-5.4-pro', label: 'GPT-5.4 Pro', shortLabel: '5.4 Pro' },
+    { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini', shortLabel: '5.4 Mini' },
+    { id: 'gpt-5.4-nano', label: 'GPT-5.4 Nano', shortLabel: '5.4 Nano' },
+    { id: 'gpt-5.3-codex-spark', label: 'GPT-5.3 Codex Spark', shortLabel: 'Spark' },
+];
+
+export const aiReasoningEfforts: Array<{ id: AiReasoningEffort; label: string }> = [
+    { id: 'low', label: '低' },
+    { id: 'medium', label: '中' },
+    { id: 'high', label: '高' },
+    { id: 'xhigh', label: '超高' },
+];
+
+export const aiMarkdownSpeeds: Array<{ id: AiMarkdownSpeed; label: string; description: string }> = [
+    { id: 'standard', label: '标准', description: '默认速度' },
+    { id: 'fast', label: '快速', description: '1.5x speed, increased usage' },
+];
 
 export interface AiMarkdownRequest {
     mode: AiMarkdownMode;
+    model: AiMarkdownModel;
+    reasoningEffort: AiReasoningEffort;
+    speed: AiMarkdownSpeed;
     task: AiMarkdownTask;
     sourceText: string;
     extraInstruction: string;
@@ -23,7 +62,7 @@ function getAiStreamError(event: any): string {
     if (code === 'insufficient_quota') return 'OpenAI 额度不足或账单未开通，请检查账户 Billing / Credits';
     if (code === 'rate_limit_exceeded') return 'OpenAI 请求过于频繁，请稍后再试';
     if (code === 'invalid_api_key') return 'OpenAI API Key 无效，请重新配置';
-    if (code === 'model_not_found') return '当前 OpenAI 模型不可用，请检查 OPENAI_MODEL';
+    if (code === 'model_not_found') return '当前 OpenAI 模型不可用，请检查模型选择或 OPENAI_MODEL';
 
     return typeof error?.message === 'string' ? error.message : 'OpenAI 生成失败';
 }
@@ -32,9 +71,11 @@ export async function streamAiMarkdown(
     payload: AiMarkdownRequest,
     options: {
         signal?: AbortSignal;
+        onConnected?: (connectionMs: number) => void;
         onDelta: (delta: string) => void;
     }
 ): Promise<string> {
+    const startedAt = performance.now();
     const response = await fetch('/api/ai-markdown', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -53,6 +94,8 @@ export async function streamAiMarkdown(
         }
         throw new Error(message);
     }
+
+    options.onConnected?.(performance.now() - startedAt);
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();

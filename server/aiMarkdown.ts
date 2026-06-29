@@ -6,13 +6,28 @@ type AiMarkdownTask = 'generate' | 'revise' | 'continue';
 
 interface AiMarkdownBody {
     mode?: AiMarkdownMode;
+    model?: string;
+    reasoningEffort?: string;
+    speed?: string;
     task?: AiMarkdownTask;
     sourceText?: string;
     extraInstruction?: string;
 }
 
 const OPENAI_API_URL = 'https://api.openai.com/v1/responses';
-const DEFAULT_MODEL = 'gpt-5.5';
+const DEFAULT_MODEL = 'gpt-5.4-nano';
+const DEFAULT_REASONING_EFFORT = 'low';
+const SELECTABLE_MODELS = new Set([
+    'gpt-5.5',
+    'gpt-5.5-pro',
+    'gpt-5.4',
+    'gpt-5.4-pro',
+    'gpt-5.4-mini',
+    'gpt-5.4-nano',
+    'gpt-5.3-codex-spark',
+]);
+const SELECTABLE_REASONING_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh']);
+const SELECTABLE_SPEEDS = new Set(['standard', 'fast']);
 let proxyReady = false;
 
 function readEnv(name: string) {
@@ -56,7 +71,7 @@ async function readOpenAIError(upstream: Response) {
     }
 
     if (code === 'model_not_found') {
-        return '当前 OpenAI 模型不可用，请检查 OPENAI_MODEL 环境变量';
+        return '当前 OpenAI 模型不可用，请检查模型选择或 OPENAI_MODEL 环境变量';
     }
 
     return `OpenAI 请求失败（${upstream.status || 502}）`;
@@ -91,8 +106,11 @@ function buildInstructions(mode: AiMarkdownMode, task: AiMarkdownTask) {
         'Do not include explanations, greetings, analysis, JSON, HTML, or wrapping code fences such as ```markdown.',
         'Do not invent facts, claims, data, links, names, dates, examples, or conclusions that are not present in the user-provided text.',
         'Keep the output in the same language as the source text unless the user explicitly asks for another language.',
-        'Use Markdown features intentionally: headings, lists, emphasis, blockquotes, tables, task lists, and code fences only when the source content naturally supports them.',
-        'Prefer readable structure over decoration. Avoid excessive bold text, unnecessary tables, and noisy formatting.',
+        'Produce Chinese-first, publish-ready Markdown with the richness of Marka\'s built-in product guide when the source supports it. Use natural Chinese short paragraphs, full-width Chinese punctuation in Chinese prose, readable spacing around English words/numbers/product names/inline code, and one blank line between different Markdown block types.',
+        'Before writing, silently infer the source type and hierarchy, then map source relationships to Markdown structures: H1 for a source-implied document title, H2 for major sections, H3 for subtopics, blockquotes for summaries/positioning/warnings/caveats/key takeaways/quoted material, ordered lists for steps/sequences/rankings/timelines/workflows, unordered lists for grouped features/details/benefits/requirements/notes/examples, and bold lead labels when each item has a name plus explanation.',
+        'Maximize applicable Markdown coverage. Actively use every Markdown feature that the source legitimately supports: tables for comparisons/feature matrices/parameters/plans/pros-cons/schedules/aligned fields; task lists for todos/checklists/action items/requirements/completion states; fenced code blocks for code/commands/config/logs/data samples/templates/pseudo-code; inline code for commands/identifiers/file names/API names/variables/config keys/keyboard shortcuts/literal values; italic for restrained nuance/titles/contrast; strikethrough only for deprecated/removed/replaced content; links and images only when source URLs or image references exist; horizontal rules before final tips/notes/appendices in longer documents.',
+        'Do not force unsupported Markdown features, but do not under-format. A weak output collapses rich source material into plain paragraphs, a shallow outline, or only short bullet lists when the source contains comparison, steps, examples, code, caveats, summaries, action items, or feature groups.',
+        'Prefer readable publishing structure over decoration. Avoid empty sections, repeated blank lines, invented examples, gratuitous tables, forced code blocks, and excessive bold text.',
         'Follow the user\'s extra requirements unless they conflict with factual preservation, Markdown-only output, or the selected mode.',
     ];
 
@@ -113,7 +131,7 @@ function buildInstructions(mode: AiMarkdownMode, task: AiMarkdownTask) {
     return base.join('\n');
 }
 
-function buildInput(body: Required<AiMarkdownBody>) {
+function buildInput(body: { task: AiMarkdownTask; sourceText: string; extraInstruction: string }) {
     const label = body.task === 'revise' ? 'Current Markdown source' : body.task === 'continue' ? 'Existing partial Markdown' : 'Source plain text';
     const instruction = body.extraInstruction.trim() || 'No additional requirements.';
     return [
@@ -144,13 +162,35 @@ export async function handleAiMarkdownRequest(req: IncomingMessage, res: ServerR
 
     const mode = body.mode === 'rewrite' ? 'rewrite' : 'format';
     const task = body.task === 'revise' ? 'revise' : body.task === 'continue' ? 'continue' : 'generate';
+    const requestedModel = (body.model || '').trim();
+    const requestedReasoningEffort = (body.reasoningEffort || '').trim();
+    const requestedSpeed = (body.speed || '').trim();
     const sourceText = (body.sourceText || '').trim();
     const extraInstruction = body.extraInstruction || '';
+
+    if (requestedModel && !SELECTABLE_MODELS.has(requestedModel)) {
+        sendJson(res, 400, { error: '请选择有效的 OpenAI 模型' });
+        return;
+    }
+
+    if (requestedReasoningEffort && !SELECTABLE_REASONING_EFFORTS.has(requestedReasoningEffort)) {
+        sendJson(res, 400, { error: '请选择有效的推理等级' });
+        return;
+    }
+
+    if (requestedSpeed && !SELECTABLE_SPEEDS.has(requestedSpeed)) {
+        sendJson(res, 400, { error: '请选择有效的速度设置' });
+        return;
+    }
 
     if (!sourceText) {
         sendJson(res, 400, { error: task === 'generate' ? '请输入纯文本内容' : '没有可继续处理的 Markdown' });
         return;
     }
+
+    const model = requestedModel || readEnv('OPENAI_MODEL') || DEFAULT_MODEL;
+    const reasoningEffort = requestedReasoningEffort || DEFAULT_REASONING_EFFORT;
+    const serviceTier = requestedSpeed === 'fast' ? 'priority' : 'default';
 
     let upstream: Response;
     try {
@@ -162,10 +202,12 @@ export async function handleAiMarkdownRequest(req: IncomingMessage, res: ServerR
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-                model: readEnv('OPENAI_MODEL') || DEFAULT_MODEL,
+                model,
+                reasoning: { effort: reasoningEffort },
+                service_tier: serviceTier,
                 stream: true,
                 instructions: buildInstructions(mode, task),
-                input: buildInput({ mode, task, sourceText, extraInstruction }),
+                input: buildInput({ task, sourceText, extraInstruction }),
             }),
         });
     } catch (err) {

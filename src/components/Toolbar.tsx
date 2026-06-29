@@ -110,7 +110,7 @@ export function DesktopToolbar({
     const actionMap: Record<string, () => void> = { onExportPdf, onExportHtml, onExportMarkdown };
 
     return (
-        <div className="flex-1 min-w-0 flex items-center justify-end px-3 lg:px-4 py-2 shrink-0 gap-2">
+        <div className="flex-1 min-w-0 flex items-center justify-end px-3 lg:px-4 py-0.5 shrink-0 gap-2">
             <div className={segWrap} role="group" aria-label="预览设备">
                 <button
                     data-testid="device-mobile"

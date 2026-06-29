@@ -1,5 +1,5 @@
-import React, { useEffect, useRef } from 'react';
-import DeviceFrame from './DeviceFrame';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import DeviceFrame, { DEVICE_FRAME_PADDING, DEVICE_FRAME_SIZE } from './DeviceFrame';
 
 interface PreviewPanelProps {
     renderedHtml: string;
@@ -28,9 +28,11 @@ export default function PreviewPanel({
     onImageClick,
     isMobileView
 }: PreviewPanelProps) {
-    const isFramedDevice = previewDevice !== 'pc' && !isMobileView;
+    const framedDevice = previewDevice === 'pc' || isMobileView ? null : previewDevice;
+    const framedDeviceSpacing = 'self-center h-full py-[clamp(6px,1.25vh,12px)] px-[clamp(2px,0.5vw,8px)]';
     const containerRef = useRef<HTMLDivElement>(null);
     const contentRef = useRef<HTMLDivElement>(null);
+    const [screenSize, setScreenSize] = useState<{ width: number; height: number } | undefined>();
 
     // Sync internal contentRef to external previewRef
     useEffect(() => {
@@ -118,11 +120,44 @@ export default function PreviewPanel({
         };
     }, [onImageClick]);
 
+    useLayoutEffect(() => {
+        if (!framedDevice) {
+            setScreenSize(undefined);
+            return;
+        }
+
+        const element = containerRef.current;
+        if (!element) return;
+        const { width: baseWidth, height: baseHeight } = DEVICE_FRAME_SIZE[framedDevice];
+        const framePadding = DEVICE_FRAME_PADDING[framedDevice];
+        const ratio = baseWidth / baseHeight;
+
+        const updateSize = () => {
+            const styles = window.getComputedStyle(element);
+            const availableWidth = element.clientWidth - parseFloat(styles.paddingLeft) - parseFloat(styles.paddingRight);
+            const availableHeight = element.clientHeight - parseFloat(styles.paddingTop) - parseFloat(styles.paddingBottom);
+            if (availableWidth <= 0 || availableHeight <= 0) return;
+
+            const screenAvailableWidth = availableWidth - framePadding * 2;
+            const screenAvailableHeight = availableHeight - framePadding * 2;
+            if (screenAvailableWidth <= 0 || screenAvailableHeight <= 0) return;
+
+            const width = Math.floor(Math.min(screenAvailableWidth, screenAvailableHeight * ratio));
+            const height = Math.floor(width / ratio);
+            setScreenSize(prev => prev && prev.width === width && prev.height === height ? prev : { width, height });
+        };
+
+        updateSize();
+        const observer = new ResizeObserver(updateSize);
+        observer.observe(element);
+        return () => observer.disconnect();
+    }, [framedDevice]);
+
     return (
         <div
             ref={previewOuterScrollRef}
             data-testid="preview-outer-scroll"
-            onScroll={scrollSyncEnabled && (isMobileView || !isFramedDevice) ? onPreviewOuterScroll : undefined}
+            onScroll={scrollSyncEnabled && (isMobileView || !framedDevice) ? onPreviewOuterScroll : undefined}
             className={`relative overflow-y-auto no-scrollbar flex flex-col z-20 flex-1 min-h-0 w-full overflow-x-hidden scroll-touch ${isMobileView ? 'bg-white dark:bg-[#1c1c1e]' : 'bg-[#f2f2f7]/50 dark:bg-[#000000]'}`}
         >
             {isMobileView ? (
@@ -135,13 +170,14 @@ export default function PreviewPanel({
             ) : (
                 <div
                     ref={containerRef}
-                    className={`${deviceWidthClass} transition-all duration-500 ${isFramedDevice ? 'self-center my-[clamp(8px,2vh,24px)] px-[clamp(2px,0.5vw,8px)]' : 'mt-[clamp(8px,2vh,20px)] mb-[clamp(24px,6vh,56px)] ml-[clamp(4px,1vw,16px)] mr-auto'} h-fit ${isFramedDevice ? '' : 'min-h-[calc(100%-40px)]'} flex items-start justify-center relative`}
+                    className={`${deviceWidthClass} ${framedDevice ? framedDeviceSpacing : 'mt-[clamp(8px,2vh,20px)] mb-[clamp(24px,6vh,56px)] ml-[clamp(4px,1vw,16px)] mr-auto h-fit'} ${framedDevice ? '' : 'min-h-[calc(100%-40px)]'} flex ${framedDevice ? 'items-center' : 'items-start'} justify-center relative`}
                 >
-                    {isFramedDevice ? (
+                    {framedDevice ? (
                         <DeviceFrame
-                            device={previewDevice as 'mobile' | 'tablet'}
+                            device={framedDevice}
                             scrollRef={previewInnerScrollRef}
                             onScroll={scrollSyncEnabled ? onPreviewInnerScroll : undefined}
+                            screenSize={screenSize}
                         >
                             <div
                                 ref={contentRef}
@@ -151,7 +187,7 @@ export default function PreviewPanel({
                             />
                         </DeviceFrame>
                     ) : (
-                        <div className="bg-white rounded-[24px] overflow-hidden shadow-apple-lg transition-all duration-500 ring-1 ring-[#00000008] border-t border-white/50 w-full">
+                        <div className="bg-white rounded-[24px] overflow-hidden shadow-apple-lg ring-1 ring-[#00000008] border-t border-white/50 w-full">
                             <div
                                 ref={contentRef}
                                 data-testid="preview-content"
