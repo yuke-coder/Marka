@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type TouchEvent as ReactTouchEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Clipboard, Eraser, Loader2, RefreshCcw, Sparkles, Wand2, X } from 'lucide-react';
+import { Check, Clipboard, Copy, Eraser, Loader2, RefreshCcw, RemoveFormatting, Sparkles, Wand2, X } from 'lucide-react';
 import {
     cleanAiMarkdown,
     streamAiMarkdown,
@@ -46,8 +46,10 @@ const MODE_TIP_DURATION = 3200;
 
 const fieldClass = 'w-full resize-none rounded-md bg-white px-3 py-2.5 text-[13px] leading-6 text-[#1d1d1f] shadow-[inset_0_0_0_1px_rgba(29,29,31,0.1)] outline-none transition placeholder-[#9a9aa0] focus:shadow-[inset_0_0_0_1px_#0a84ff,0_0_0_3px_rgba(10,132,255,0.14)] dark:bg-[#171719] dark:text-[#f5f5f7] dark:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.12)] disabled:opacity-70';
 const ghostButton = 'inline-flex h-8 items-center justify-center gap-1.5 rounded-md bg-[#eef0f4] px-3 text-[12px] font-medium text-[#4b5563] transition-colors hover:bg-[#e4e7ec] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#2c2c2e] dark:text-[#d1d1d6] dark:hover:bg-[#3a3a3c]';
+const compactFieldButton = 'inline-flex h-7 items-center justify-center gap-1 rounded-md bg-[#eef0f4] px-2 text-[11px] font-medium text-[#4b5563] transition-colors active:bg-[#e4e7ec] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#2c2c2e] dark:text-[#d1d1d6] dark:active:bg-[#3a3a3c]';
 const primaryButton = 'inline-flex h-8 items-center justify-center gap-1.5 rounded-md bg-[#1d1d1f] px-3.5 text-[12px] font-semibold text-white transition-colors hover:bg-[#2f3137] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 disabled:cursor-not-allowed disabled:opacity-55 dark:bg-[#f5f5f7] dark:text-black';
 const labelClass = 'text-[12px] font-semibold text-[#4f5866] dark:text-[#c7c7cc]';
+const iconButton = 'inline-flex h-5 w-5 items-center justify-center rounded-[4px] bg-transparent text-[#86868b] transition-colors hover:bg-black/[0.06] hover:text-[#4b5563] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/30 disabled:cursor-not-allowed disabled:opacity-30 dark:text-[#8e8e93] dark:hover:bg-white/[0.07] dark:hover:text-[#c7c7cc]';
 
 // 通过临时 offscreen 元素执行 execCommand('paste')，不污染目标输入框
 function readClipboardViaTempElement(tag: 'textarea' | 'div'): string | null {
@@ -74,10 +76,52 @@ function readClipboardViaTempElement(tag: 'textarea' | 'div'): string | null {
     return text || null;
 }
 
+function decodeHtmlEntities(text: string) {
+    const textarea = document.createElement('textarea');
+    textarea.innerHTML = text;
+    return textarea.value;
+}
+
+function removeMarkdownFormatting(markdown: string) {
+    let text = markdown.replace(/\r\n?/g, '\n');
+
+    text = text.replace(/```[^\n]*\n([\s\S]*?)\n?```/g, '$1');
+    text = text.replace(/~~~[^\n]*\n([\s\S]*?)\n?~~~/g, '$1');
+    text = text.replace(/^\s{0,3}#{1,6}\s+/gm, '');
+    text = text.replace(/^\s{0,3}>\s?/gm, '');
+    text = text.replace(/^\s{0,3}(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/gm, '');
+    text = text.replace(/^\s{0,3}[-*_]{3,}\s*$/gm, '');
+    text = text.replace(/^\s*\|?[\s:-]{3,}\|[\s|:-]*$/gm, '');
+    text = text.replace(/^\s*\|(.+)\|\s*$/gm, (_, cells: string) => cells.split('|').map(cell => cell.trim()).filter(Boolean).join('  '));
+    text = text.replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1');
+    text = text.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+    text = text.replace(/\[([^\]]+)\]\[[^\]]*\]/g, '$1');
+    text = text.replace(/^\s{0,3}\[[^\]]+\]:\s+\S+.*$/gm, '');
+    text = text.replace(/`{1,2}([^`]+)`{1,2}/g, '$1');
+    text = text.replace(/~~([^~]+)~~/g, '$1');
+
+    for (let i = 0; i < 2; i += 1) {
+        text = text
+            .replace(/(\*\*\*|___)(.*?)\1/g, '$2')
+            .replace(/(\*\*|__)(.*?)\1/g, '$2')
+            .replace(/(^|[^\w])([*_])([^*_]+)\2(?=[^\w]|$)/g, '$1$3');
+    }
+
+    text = text
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/?(?:p|div|h[1-6]|li|blockquote)[^>]*>/gi, '\n')
+        .replace(/<[^>]+>/g, '');
+
+    return decodeHtmlEntities(text)
+        .replace(/[ \t]+\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
 export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
     const { isOpen, isDesktop, currentMarkdown, onClose, onApply, onStreamReplace, showNotice } = props;
     const [mode, setMode] = useState<AiMarkdownMode>('format');
-    const [sourceText, setSourceText] = useState('');
+    const [hasSourceText, setHasSourceText] = useState(false);
     const [extraInstruction, setExtraInstruction] = useState('');
     const [followup, setFollowup] = useState('');
     const [result, setResult] = useState('');
@@ -88,20 +132,24 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
     const [confirmingReplace, setConfirmingReplace] = useState(false);
     const [modeTip, setModeTip] = useState<{ mode: AiMarkdownMode; id: number } | null>(null);
     const [isModeTipPaused, setIsModeTipPaused] = useState(false);
+    const [copiedFields, setCopiedFields] = useState({ source: false, extra: false, followup: false });
     const [sheetHeight, setSheetHeight] = useState(88);
     const [modeDrag, setModeDrag] = useState(0);
     const [isModeDragging, setIsModeDragging] = useState(false);
 
     const abortRef = useRef<AbortController | null>(null);
     const streamedRef = useRef('');
+    const sourceTextRef = useRef('');
+    const hasSourceTextRef = useRef(false);
     const sourceTextareaRef = useRef<HTMLTextAreaElement>(null);
+    const sourceLengthRef = useRef<HTMLSpanElement>(null);
     const modeTipTimerRef = useRef<number | null>(null);
     const modeTipStartedAtRef = useRef(0);
     const modeTipRemainingRef = useRef(MODE_TIP_DURATION);
     const modeSwipeRef = useRef<{ startX: number; startY: number; locked: false | 'h' | 'v' }>({ startX: 0, startY: 0, locked: false });
 
     const isGenerating = phase === 'generating';
-    const canGenerate = sourceText.trim().length > 0 && !isGenerating;
+    const canGenerate = hasSourceText && !isGenerating;
     const showOutput = phase !== 'idle' || Boolean(result);
 
     useEffect(() => {
@@ -142,27 +190,32 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
         }
     }, [result]);
 
+    const syncSourceText = useCallback((text: string) => {
+        sourceTextRef.current = text;
+        if (sourceLengthRef.current) sourceLengthRef.current.textContent = `${text.length} 字`;
+
+        const nextHasSourceText = text.trim().length > 0;
+        if (hasSourceTextRef.current !== nextHasSourceText) {
+            hasSourceTextRef.current = nextHasSourceText;
+            setHasSourceText(nextHasSourceText);
+        }
+    }, []);
+
     const insertSourceText = useCallback((text: string) => {
         const textarea = sourceTextareaRef.current;
         if (!textarea) {
-            setSourceText(prev => prev + text);
+            syncSourceText(sourceTextRef.current + text);
             return;
         }
 
-        const start = textarea.selectionStart ?? sourceText.length;
-        const end = textarea.selectionEnd ?? sourceText.length;
-        setSourceText(sourceText.slice(0, start) + text + sourceText.slice(end));
-        requestAnimationFrame(() => {
-            const pos = start + text.length;
-            textarea.focus();
-            textarea.setSelectionRange(pos, pos);
-        });
-    }, [sourceText]);
+        const currentValue = textarea.value;
+        const start = textarea.selectionStart ?? currentValue.length;
+        const end = textarea.selectionEnd ?? currentValue.length;
+        textarea.setRangeText(text, start, end, 'end');
+        syncSourceText(textarea.value);
+    }, [syncSourceText]);
 
     const pasteSourceText = useCallback(async () => {
-        const textarea = sourceTextareaRef.current;
-        textarea?.focus();
-
         let text: string | null = null;
 
         // 1. Clipboard API — 用户点击触发时会弹出浏览器权限授权
@@ -189,7 +242,6 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
 
         if (!text) {
             showNotice('粘贴失败', '未获得剪贴板权限或剪贴板为空', 'error');
-            textarea?.focus();
             return;
         }
 
@@ -198,10 +250,24 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
     }, [insertSourceText, showNotice]);
 
     const clearSourceText = useCallback(() => {
-        setSourceText('');
-        sourceTextareaRef.current?.focus();
+        const textarea = sourceTextareaRef.current;
+        if (textarea) {
+            textarea.value = '';
+            syncSourceText('');
+        } else {
+            syncSourceText('');
+        }
         showNotice('已清除', '纯文本输入框已清空', 'success');
-    }, [showNotice]);
+    }, [showNotice, syncSourceText]);
+
+    const clearSourceFormatting = useCallback(() => {
+        const textarea = sourceTextareaRef.current;
+        const currentValue = textarea?.value ?? sourceTextRef.current;
+        const plainText = removeMarkdownFormatting(currentValue);
+        if (textarea) textarea.value = plainText;
+        syncSourceText(plainText);
+        showNotice('已清除格式', '已移除 Markdown 标记，仅保留纯文本', 'success');
+    }, [showNotice, syncSourceText]);
 
     const handleSheetPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
         const startY = event.clientY;
@@ -238,6 +304,19 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
         setModeTip({ mode: nextMode, id });
         startModeTipTimer(id, MODE_TIP_DURATION);
     }, [startModeTipTimer]);
+
+    const copyField = useCallback(async (key: 'source' | 'extra' | 'followup', text: string) => {
+        if (copiedFields[key] || !text) return;
+        try {
+            await navigator.clipboard.writeText(text);
+            setCopiedFields(prev => ({ ...prev, [key]: true }));
+            window.setTimeout(() => {
+                setCopiedFields(prev => ({ ...prev, [key]: false }));
+            }, 2000);
+        } catch {
+            showNotice('复制失败', '无法写入剪贴板', 'error');
+        }
+    }, [copiedFields, showNotice]);
 
     const pauseModeTip = useCallback(() => {
         if (!modeTip || isModeTipPaused) return;
@@ -295,7 +374,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
 
     const run = useCallback(async (task: AiMarkdownTask, nextApplyMode: AiApplyMode) => {
         const partial = result || currentMarkdown;
-        const text = task === 'revise' || task === 'continue' ? partial : sourceText;
+        const text = task === 'revise' || task === 'continue' ? partial : (sourceTextareaRef.current?.value ?? sourceTextRef.current);
         const instruction = task === 'revise' ? followup.trim() || extraInstruction : extraInstruction;
 
         if (!text.trim()) {
@@ -338,7 +417,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
         } finally {
             if (abortRef.current === controller) abortRef.current = null;
         }
-    }, [currentMarkdown, extraInstruction, followup, mode, onApply, result, showNotice, sourceText]);
+    }, [currentMarkdown, extraInstruction, followup, mode, onApply, result, showNotice]);
 
     const askConfirm = useCallback(() => {
         if (!canGenerate) return;
@@ -444,36 +523,63 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
     const inputPane = (
         <section className={`${isDesktop ? 'min-h-0 overflow-auto' : ''} space-y-3`}>
             {isDesktop && renderModeSwitch()}
-            <label className="block">
-                <span className="mb-2 flex items-center justify-between gap-2">
-                    <span className="flex items-center gap-2">
+            <div className="block">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-1">
                         <span className={labelClass}>纯文本内容</span>
-                        <span className="text-[11px] text-[#86868b] dark:text-[#8e8e93]">{sourceText.length} 字</span>
+                        <button
+                            type="button"
+                            aria-label="复制纯文本内容"
+                            title="复制"
+                            disabled={copiedFields.source || !hasSourceText}
+                            onClick={() => void copyField('source', sourceTextareaRef.current?.value ?? sourceTextRef.current)}
+                            className={iconButton}
+                        >
+                            {copiedFields.source ? <Check size={11} className="text-[#008847] dark:text-[#5de086]" /> : <Copy size={11} />}
+                        </button>
+                        <span ref={sourceLengthRef} className="text-[11px] text-[#86868b] dark:text-[#8e8e93]">{sourceTextRef.current.length} 字</span>
                     </span>
-                    <span className="flex items-center gap-1.5">
-                        <button type="button" onClick={() => void pasteSourceText()} disabled={isGenerating} className={ghostButton}>
-                            <Clipboard size={12} />
+                    <span className={`flex items-center ${isDesktop ? 'gap-1.5' : 'gap-1'}`}>
+                        <button type="button" onClick={() => void pasteSourceText()} disabled={isGenerating} className={isDesktop ? ghostButton : compactFieldButton}>
+                            <Clipboard size={isDesktop ? 12 : 11} />
                             粘贴
                         </button>
-                        <button type="button" onClick={clearSourceText} disabled={isGenerating || !sourceText} className={ghostButton}>
-                            <Eraser size={12} />
+                        <button type="button" onClick={clearSourceFormatting} disabled={isGenerating || !hasSourceText} className={isDesktop ? ghostButton : compactFieldButton}>
+                            <RemoveFormatting size={isDesktop ? 12 : 11} />
+                            清除格式
+                        </button>
+                        <button type="button" onClick={clearSourceText} disabled={isGenerating || !hasSourceText} className={isDesktop ? ghostButton : compactFieldButton}>
+                            <Eraser size={isDesktop ? 12 : 11} />
                             清除
                         </button>
                     </span>
-                </span>
+                </div>
                 <textarea
                     ref={sourceTextareaRef}
                     data-testid="ai-source-text"
-                    value={sourceText}
-                    onChange={(e) => setSourceText(e.target.value)}
+                    aria-label="纯文本内容"
+                    defaultValue={sourceTextRef.current}
+                    onInput={(e) => syncSourceText(e.currentTarget.value)}
                     className={`${fieldClass} ${isDesktop ? 'h-[238px]' : 'h-36'}`}
                     placeholder="粘贴需要转换的纯文本..."
                     disabled={isGenerating}
                 />
-            </label>
+            </div>
 
             <label className="block">
-                <span className={`mb-2 block ${labelClass}`}>额外要求</span>
+                <div className="mb-2 flex items-center gap-1">
+                    <span className={labelClass}>额外要求</span>
+                    <button
+                        type="button"
+                        aria-label="复制额外要求"
+                        title="复制"
+                        disabled={copiedFields.extra || !extraInstruction}
+                        onClick={() => void copyField('extra', extraInstruction)}
+                        className={iconButton}
+                    >
+                        {copiedFields.extra ? <Check size={11} className="text-[#008847] dark:text-[#5de086]" /> : <Copy size={11} />}
+                    </button>
+                </div>
                 <textarea
                     data-testid="ai-extra-instruction"
                     value={extraInstruction}
@@ -503,7 +609,19 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                 <div className="mt-3 space-y-3">
                     {renderApplySwitch()}
                     <label className="block">
-                        <span className={`mb-2 block ${labelClass}`}>继续更改和优化</span>
+                        <div className="mb-2 flex items-center gap-1">
+                            <span className={labelClass}>继续更改和优化</span>
+                            <button
+                                type="button"
+                                aria-label="复制继续更改和优化"
+                                title="复制"
+                                disabled={copiedFields.followup || !followup}
+                                onClick={() => void copyField('followup', followup)}
+                                className={iconButton}
+                            >
+                                {copiedFields.followup ? <Check size={11} className="text-[#008847] dark:text-[#5de086]" /> : <Copy size={11} />}
+                            </button>
+                        </div>
                         <textarea
                             value={followup}
                             onChange={(e) => setFollowup(e.target.value)}
@@ -542,7 +660,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                     <button
                         onClick={() => {
                             setConfirmingReplace(false);
-                            onStreamReplace({ mode, task: 'generate', sourceText, extraInstruction });
+                            onStreamReplace({ mode, task: 'generate', sourceText: sourceTextareaRef.current?.value ?? sourceTextRef.current, extraInstruction });
                         }}
                         className={primaryButton}
                     >
@@ -555,46 +673,77 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
     );
 
     const modeTipNotice = modeTip && (
-        <motion.div
-            key={modeTip.id}
-            initial={{ opacity: 0, x: '110%', scale: 0.98 }}
-            animate={{ opacity: 1, x: 0, scale: 1 }}
-            exit={{ opacity: 0, x: '110%', scale: 0.98 }}
-            transition={{ duration: 0.24, ease: [0.25, 0.1, 0.25, 1] }}
-            role="status"
-            aria-live="polite"
-            aria-atomic="true"
-            onMouseEnter={pauseModeTip}
-            onMouseLeave={resumeModeTip}
-            className={`${isDesktop ? 'fixed right-6 top-6 z-[240] w-[360px] max-w-[calc(100vw-32px)]' : 'fixed right-5 top-5 z-[240] w-[calc(100vw-40px)]'} overflow-hidden rounded-lg bg-white shadow-[0_24px_70px_rgba(15,23,42,0.28)] ring-1 ring-black/[0.06] dark:bg-[#242426] dark:ring-white/[0.08]`}
-        >
-            <div className="flex items-start gap-3 p-3.5 pr-10">
-                <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[#eef5ff] text-[#0066cc] dark:bg-[#12304f] dark:text-[#8cc7ff]">
-                    <Sparkles size={14} />
-                </div>
-                <div className="min-w-0">
-                    <p className="text-[14px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7]">{modeTips[modeTip.mode].title}</p>
-                    <p className="mt-0.5 text-[12px] leading-5 text-[#5f6875] dark:text-[#c7c7cc]">{modeTips[modeTip.mode].body}</p>
-                </div>
-            </div>
-            <div className="pointer-events-none absolute inset-y-0 right-8 w-10 bg-gradient-to-r from-transparent to-white dark:to-[#242426]" />
-            <button
-                type="button"
-                aria-label="关闭提示"
-                title="关闭提示"
-                onClick={(event) => {
-                    event.stopPropagation();
-                    setModeTip(null);
-                }}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-[#86868b] transition-colors hover:bg-black/[0.06] hover:text-[#1d1d1f] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 dark:text-[#a1a1a6] dark:hover:bg-white/[0.08] dark:hover:text-[#f5f5f7]"
+        isDesktop ? (
+            <motion.div
+                key={modeTip.id}
+                initial={{ opacity: 0, x: '110%', scale: 0.98 }}
+                animate={{ opacity: 1, x: 0, scale: 1 }}
+                exit={{ opacity: 0, x: '110%', scale: 0.98 }}
+                transition={{ duration: 0.24, ease: [0.25, 0.1, 0.25, 1] }}
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+                onMouseEnter={pauseModeTip}
+                onMouseLeave={resumeModeTip}
+                className="fixed right-6 top-6 z-[240] w-[360px] max-w-[calc(100vw-32px)] overflow-hidden rounded-lg bg-white shadow-[0_24px_70px_rgba(15,23,42,0.28)] ring-1 ring-black/[0.06] dark:bg-[#242426] dark:ring-white/[0.08]"
             >
-                <X size={14} />
-            </button>
-            <div
-                className={`mode-tip-progress h-1 bg-[#0a84ff] dark:bg-[#64aaff] ${isModeTipPaused ? 'mode-tip-progress-paused' : ''}`}
-                style={{ animationDuration: `${MODE_TIP_DURATION}ms` }}
-            />
-        </motion.div>
+                <div className="flex items-start gap-3 p-3.5 pr-10">
+                    <div className="min-w-0">
+                        <p className="text-[14px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7]">{modeTips[modeTip.mode].title}</p>
+                        <p className="mt-0.5 text-[12px] leading-5 text-[#5f6875] dark:text-[#c7c7cc]">{modeTips[modeTip.mode].body}</p>
+                    </div>
+                </div>
+                <div className="pointer-events-none absolute inset-y-0 right-8 w-10 bg-gradient-to-r from-transparent to-white dark:to-[#242426]" />
+                <button
+                    type="button"
+                    aria-label="关闭提示"
+                    title="关闭提示"
+                    onClick={(event) => { event.stopPropagation(); setModeTip(null); }}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-[#86868b] transition-colors hover:bg-black/[0.06] hover:text-[#1d1d1f] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 dark:text-[#a1a1a6] dark:hover:bg-white/[0.08] dark:hover:text-[#f5f5f7]"
+                >
+                    <X size={14} />
+                </button>
+                <div
+                    className={`mode-tip-progress h-1 bg-[#0a84ff] dark:bg-[#64aaff] ${isModeTipPaused ? 'mode-tip-progress-paused' : ''}`}
+                    style={{ animationDuration: `${MODE_TIP_DURATION}ms` }}
+                />
+            </motion.div>
+        ) : (
+            <motion.div
+                key={modeTip.id}
+                initial={{ opacity: 0.5, x: '110%', scale: 0.96 }}
+                animate={{ opacity: 1, x: 0, scale: 1 }}
+                exit={{ opacity: 0, x: '110%', scale: 0.96 }}
+                transition={{ duration: 0.24, ease: [0.25, 0.1, 0.25, 1] }}
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+                onMouseEnter={pauseModeTip}
+                onMouseLeave={resumeModeTip}
+                className="fixed right-4 top-4 z-[240] flex w-auto max-w-[min(88vw,280px)] items-start gap-2.5 rounded-lg bg-white px-3 py-2.5 shadow-[0_3px_10px_rgba(0,0,0,0.1),0_3px_3px_rgba(0,0,0,0.05)] will-change-transform dark:bg-[#242426]"
+            >
+                <div className="relative min-w-0 flex-1 overflow-hidden pr-4">
+                    <span className="block text-[13px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7]">{modeTips[modeTip.mode].title}</span>
+                    <span className="block text-[11px] text-[#6b7280] dark:text-[#9ca3af]">{modeTips[modeTip.mode].body}</span>
+                    <div className="pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-r from-transparent to-white dark:to-[#242426]" />
+                </div>
+                <button
+                    type="button"
+                    aria-label="关闭提示"
+                    title="关闭提示"
+                    onClick={(event) => { event.stopPropagation(); setModeTip(null); }}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 shrink-0 rounded-md p-1 text-[#86868b] transition-colors hover:bg-black/[0.06] hover:text-[#1d1d1f] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 dark:text-[#a1a1a6] dark:hover:bg-white/[0.08] dark:hover:text-[#f5f5f7]"
+                >
+                    <X size={14} />
+                </button>
+                <motion.div
+                    initial={{ scaleX: 1 }}
+                    animate={{ scaleX: isModeTipPaused ? 1 : 0 }}
+                    transition={{ duration: MODE_TIP_DURATION / 1000, ease: 'linear' }}
+                    className="absolute bottom-0 left-0 right-0 h-0.5 origin-left bg-[#0a84ff] dark:bg-[#64aaff]"
+                />
+            </motion.div>
+        )
     );
 
     return createPortal(
@@ -663,7 +812,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                                 </div>
                                 {renderModeSwitch(true)}
                             </header>
-                            <main className="min-h-0 space-y-3 overflow-y-auto px-4 py-3 pb-24 scroll-touch">
+                            <main className="min-h-0 space-y-3 overflow-y-auto px-4 py-3 scroll-touch">
                                 {inputPane}
                                 {showOutput && renderOutputPane()}
                             </main>

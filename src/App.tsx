@@ -24,6 +24,10 @@ const SPLIT_RATIO_DEFAULT = 38.2;
 const PREVIEW_DEVICE_STORAGE_KEY = 'marka:previewDevice';
 const PREVIEW_DEVICE_DEFAULT: 'mobile' | 'tablet' | 'pc' = 'pc';
 
+function isTextEditingTarget(target: EventTarget | null) {
+    return target instanceof HTMLElement && Boolean(target.closest('textarea, input, [contenteditable="true"], [data-swipe-ignore="true"]'));
+}
+
 function loadPreviewDevice(): 'mobile' | 'tablet' | 'pc' {
     try {
         const raw = localStorage.getItem(PREVIEW_DEVICE_STORAGE_KEY);
@@ -268,6 +272,12 @@ export default function App() {
 
     const handleTouchStart = useCallback((e: React.TouchEvent) => {
         if (isDesktop) return;
+        if (isTextEditingTarget(e.target)) {
+            swipeRef.current = { startX: 0, startY: 0, locked: 'v' };
+            setSwipeDx(0);
+            setIsSwiping(false);
+            return;
+        }
         const t = e.touches[0];
         swipeRef.current = { startX: t.clientX, startY: t.clientY, locked: false };
         setSwipeDx(0);
