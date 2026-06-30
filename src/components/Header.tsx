@@ -59,7 +59,7 @@ export default function Header({ themeMode, onToggleTheme, onOpenAi, isImmersive
                     data-testid="ai-markdown-open"
                     onClick={onOpenAi}
                     className="inline-flex items-center gap-1 h-7 px-2 sm:px-2.5 rounded-md border border-[#00000012] dark:border-[#ffffff16] text-[11px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7] bg-white/45 dark:bg-white/[0.06] hover:bg-white/70 dark:hover:bg-white/[0.1] transition-colors active:scale-[0.97]"
-                    title="AI 优化 Markdown"
+                    data-tooltip="AI 优化 Markdown"
                 >
                     <span className="hidden sm:inline">AI 优化</span>
                     <span className="sm:hidden">AI</span>

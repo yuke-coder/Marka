@@ -69,10 +69,10 @@
 
     @keyframes ai-thinking-sweep {
         from {
-            background-position: 140% 0;
+            background-position: -180% 0;
         }
         to {
-            background-position: -140% 0;
+            background-position: 180% 0;
         }
     }
 
@@ -90,12 +90,12 @@
     .ai-thinking-shimmer {
         position: relative;
         display: inline-block;
-        color: #86868b;
+        color: #8a8a8f;
         letter-spacing: 0;
     }
 
     .dark .ai-thinking-shimmer {
-        color: #8e8e93;
+        color: #6f6f73;
     }
 
     .ai-thinking-shimmer::after {
@@ -103,15 +103,15 @@
         position: absolute;
         inset: 0;
         color: transparent;
-        background: linear-gradient(100deg, transparent 30%, rgba(29, 29, 31, 0.92) 50%, transparent 70%);
-        background-size: 220% 100%;
+        background: linear-gradient(90deg, transparent 36%, rgba(29, 29, 31, 0.72) 50%, transparent 64%);
+        background-size: 260% 100%;
         -webkit-background-clip: text;
         background-clip: text;
-        animation: ai-thinking-sweep 2.1s cubic-bezier(0.25, 0.1, 0.25, 1) infinite;
+        animation: ai-thinking-sweep 1.9s cubic-bezier(0.22, 0.61, 0.36, 1) infinite;
     }
 
     .dark .ai-thinking-shimmer::after {
-        background-image: linear-gradient(100deg, transparent 30%, rgba(245, 245, 247, 0.95) 50%, transparent 70%);
+        background-image: linear-gradient(90deg, transparent 36%, rgba(245, 245, 247, 0.82) 50%, transparent 64%);
     }
 
     .ai-atom-stage {
@@ -222,52 +222,6 @@
         @apply bg-white/70 dark:bg-[#2c2c2e]/70 backdrop-blur-[30px];
     }
 
-    .glass-panel {
-        @apply bg-white dark:bg-[#1c1c1e] shadow-apple dark:shadow-apple-dark border border-[#00000008] dark:border-[#ffffff10];
-    }
-
-    .apple-btn {
-        @apply px-4 py-2 rounded-full font-medium transition-all active:scale-95;
-    }
-
-    .apple-btn-primary {
-        @apply apple-btn bg-[#0066cc] hover:bg-[#0071e3] text-white dark:bg-[#0a84ff] dark:hover:bg-[#409cff];
-        box-shadow: 0 2px 8px rgba(0, 102, 204, 0.3);
-    }
-
-    .dark .apple-btn-primary {
-        box-shadow: 0 2px 12px rgba(10, 132, 255, 0.4);
-    }
-
-    .apple-btn-secondary {
-        @apply apple-btn bg-[#f2f2f7] hover:bg-[#e5e5ea] text-[#1d1d1f] dark:bg-[#3a3a3c] dark:hover:bg-[#48484a] dark:text-[#f5f5f7];
-    }
-
-    .apple-copy-btn {
-        @apply flex items-center justify-center gap-2 px-6 py-2 rounded-full text-[14px] font-medium transition-all duration-300;
-        @apply bg-black hover:bg-black/80 text-white dark:bg-white dark:hover:bg-white/90 dark:text-black active:scale-95;
-        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
-    }
-
-    .dark .apple-copy-btn {
-        box-shadow: 0 2px 16px rgba(255, 255, 255, 0.15);
-    }
-
-    .apple-copy-btn-success {
-        @apply flex items-center justify-center gap-2 px-6 py-2 rounded-full text-[14px] font-medium transition-all duration-300;
-        @apply bg-[#34c759] hover:bg-[#34c759]/90 text-white dark:bg-[#32d74b] dark:hover:bg-[#32d74b]/90 active:scale-95;
-        box-shadow: 0 2px 12px rgba(52, 199, 89, 0.3);
-    }
-
-    .dark .apple-copy-btn-success {
-        box-shadow: 0 2px 12px rgba(50, 215, 75, 0.3);
-    }
-
-    .apple-export-btn {
-        @apply flex items-center justify-center gap-2 px-5 py-2.5 rounded-full text-[14px] font-medium transition-all duration-300;
-        @apply bg-[#f2f2f7] hover:bg-[#e5e5ea] text-[#1d1d1f] dark:bg-[#2c2c2e] dark:hover:bg-[#3a3a3c] dark:text-[#f5f5f7] border border-[#00000010] dark:border-[#ffffff10] shadow-sm active:scale-95;
-    }
-
     /* 隐藏滚动条但保留滚动功能 */
     .no-scrollbar::-webkit-scrollbar {
         display: none;
@@ -276,6 +230,66 @@
     .no-scrollbar {
         -ms-overflow-style: none;
         scrollbar-width: none;
+    }
+
+    /* 自定义 tooltip：替换原生 title，微圆角 + 底部箭头（一体成型） */
+    [data-tooltip] {
+        position: relative;
+    }
+
+    [data-tooltip]::after {
+        content: attr(data-tooltip);
+        position: absolute;
+        bottom: calc(100% + 8px);
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 4px 10px;
+        font-size: 12px;
+        font-weight: 500;
+        color: #1d1d1f;
+        background: #fff;
+        border: 1px solid rgba(0, 0, 0, 0.08);
+        border-radius: 4px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+        white-space: nowrap;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.15s ease;
+        z-index: 100000;
+    }
+
+    [data-tooltip]::before {
+        content: '';
+        position: absolute;
+        bottom: calc(100% + 6px);
+        left: 50%;
+        transform: translateX(-50%);
+        width: 0;
+        height: 0;
+        border-left: 7px solid transparent;
+        border-right: 7px solid transparent;
+        border-top: 8px solid #fff;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.15s ease;
+        z-index: 100001;
+        filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.05));
+    }
+
+    .dark [data-tooltip]::after {
+        color: #f5f5f7;
+        background: #2c2c2e;
+        border-color: rgba(255, 255, 255, 0.1);
+    }
+
+    .dark [data-tooltip]::before {
+        border-top-color: #2c2c2e;
+        filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.2));
+    }
+
+    [data-tooltip]:hover::after,
+    [data-tooltip]:hover::before {
+        opacity: 1;
     }
 
 }

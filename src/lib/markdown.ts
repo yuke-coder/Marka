@@ -27,7 +27,7 @@ export const md = new MarkdownIt({
 
 // Avoid bold fragmentation when pasting from certain apps
 export function preprocessMarkdown(content: string) {
-    content = content.replace(/^[ ]{0,3}(\*[ ]*\*[ ]*\*[\* ]*)[ \t]*$/gm, '***');
+    content = content.replace(/^[ ]{0,3}(\*[ ]*\*[ ]*\*[* ]*)[ \t]*$/gm, '***');
     content = content.replace(/^[ ]{0,3}(-[ ]*-[ ]*-[- ]*)[ \t]*$/gm, '---');
     content = content.replace(/^[ ]{0,3}(_[ ]*_[ ]*_[_ ]*)[ \t]*$/gm, '___');
     content = content.replace(/\*\*[ \t]+\*\*/g, ' ');
@@ -36,7 +36,7 @@ export function preprocessMarkdown(content: string) {
     // and `**` is attached directly to preceding text (e.g. `至**-5%**。`).
     // Insert a zero-width separator only inside opening `**...` for these cases.
     content = content.replace(
-        /([^\s])\*\*([+\-＋－%％~～!！?？,，.。:：;；、\\/|@#￥$^&*_=（）()【】\[\]《》〈〉「」『』“”"'`…·][^\n*]*?)\*\*/g,
+        /([^\s])\*\*([+\-＋－%％~～!！?？,，.。:：;；、\\/|@#￥$^&*_=（）()【】[\]《》〈〉「」『』“”"'`…·][^\n*]*?)\*\*/g,
         '$1**\u200B$2**'
     );
     return content;

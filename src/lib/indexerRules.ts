@@ -28,21 +28,6 @@ export const ELEMENT_TYPES: readonly ElementType[] = [
 ];
 
 /**
- * HTML 标签映射
- * 用于 markdownIndexer.ts 生成 data-md-type
- */
-export const HTML_TAG_MAP: Record<ElementType, string> = {
-  heading: 'h1,h2,h3,h4,h5,h6',
-  paragraph: 'p',
-  list: 'li',
-  quote: 'blockquote',
-  code: 'pre',
-  table: 'tr',
-  hr: 'hr',
-  image: 'img',
-};
-
-/**
  * Markdown 检测规则
  * 用于 markdownLocator.ts 从文本反查
  */
@@ -107,24 +92,6 @@ export const MARKDOWN_RULES: Readonly<Record<ElementType, {
  */
 export function isValidElementType(type: string): type is ElementType {
   return (ELEMENT_TYPES as readonly string[]).includes(type);
-}
-
-/**
- * 获取元素的 HTML 标签选择器
- */
-export function getHtmlSelector(type: ElementType): string {
-  return HTML_TAG_MAP[type];
-}
-
-/**
- * 检测 Markdown 行是否符合某类型
- * @param trimmed 去掉首尾空白后的行
- * @param type 元素类型
- * @returns 是否匹配
- */
-export function matchesMarkdownType(trimmed: string, type: ElementType): boolean {
-  const rule = MARKDOWN_RULES[type];
-  return rule.match(trimmed);
 }
 
 /**

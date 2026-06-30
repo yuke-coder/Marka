@@ -1,29 +1,24 @@
 export type AiMarkdownMode = 'format' | 'rewrite';
 export type AiApplyMode = 'replace' | 'insert' | 'append';
 export type AiMarkdownTask = 'generate' | 'revise' | 'continue';
-export type AiMarkdownModel =
-    | 'gpt-5.5'
-    | 'gpt-5.5-pro'
-    | 'gpt-5.4'
-    | 'gpt-5.4-pro'
-    | 'gpt-5.4-mini'
-    | 'gpt-5.4-nano'
-    | 'gpt-5.3-codex-spark';
+export type AiMarkdownModel = string;
 export type AiReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
 export type AiMarkdownSpeed = 'standard' | 'fast';
+export interface AiMarkdownModelOption {
+    id: AiMarkdownModel;
+    label: string;
+    shortLabel: string;
+}
 
 export const DEFAULT_AI_MARKDOWN_MODEL: AiMarkdownModel = 'gpt-5.4-nano';
 export const DEFAULT_AI_REASONING_EFFORT: AiReasoningEffort = 'low';
 export const DEFAULT_AI_MARKDOWN_SPEED: AiMarkdownSpeed = 'standard';
 
-export const aiMarkdownModels: Array<{ id: AiMarkdownModel; label: string; shortLabel: string }> = [
+export const aiMarkdownModels: AiMarkdownModelOption[] = [
     { id: 'gpt-5.5', label: 'GPT-5.5', shortLabel: '5.5' },
-    { id: 'gpt-5.5-pro', label: 'GPT-5.5 Pro', shortLabel: '5.5 Pro' },
     { id: 'gpt-5.4', label: 'GPT-5.4', shortLabel: '5.4' },
-    { id: 'gpt-5.4-pro', label: 'GPT-5.4 Pro', shortLabel: '5.4 Pro' },
     { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini', shortLabel: '5.4 Mini' },
     { id: 'gpt-5.4-nano', label: 'GPT-5.4 Nano', shortLabel: '5.4 Nano' },
-    { id: 'gpt-5.3-codex-spark', label: 'GPT-5.3 Codex Spark', shortLabel: 'Spark' },
 ];
 
 export const aiReasoningEfforts: Array<{ id: AiReasoningEffort; label: string }> = [
@@ -46,6 +41,23 @@ export interface AiMarkdownRequest {
     task: AiMarkdownTask;
     sourceText: string;
     extraInstruction: string;
+}
+
+export async function fetchAiMarkdownModels(): Promise<AiMarkdownModelOption[]> {
+    const response = await fetch('/api/ai-markdown');
+    if (!response.ok) {
+        let message = '模型列表获取失败';
+        try {
+            const data = await response.json();
+            if (typeof data?.error === 'string') message = data.error;
+        } catch {
+            // Keep the generic message when the server does not return JSON.
+        }
+        throw new Error(message);
+    }
+
+    const data = await response.json();
+    return Array.isArray(data?.models) ? data.models : [];
 }
 
 export function cleanAiMarkdown(markdown: string): string {
@@ -71,11 +83,10 @@ export async function streamAiMarkdown(
     payload: AiMarkdownRequest,
     options: {
         signal?: AbortSignal;
-        onConnected?: (connectionMs: number) => void;
+        onConnected?: () => void;
         onDelta: (delta: string) => void;
     }
 ): Promise<string> {
-    const startedAt = performance.now();
     const response = await fetch('/api/ai-markdown', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -95,7 +106,7 @@ export async function streamAiMarkdown(
         throw new Error(message);
     }
 
-    options.onConnected?.(performance.now() - startedAt);
+    options.onConnected?.();
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();

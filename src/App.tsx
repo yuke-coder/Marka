@@ -26,10 +26,6 @@ const SPLIT_RATIO_DEFAULT = 38.2;
 const PREVIEW_DEVICE_STORAGE_KEY = 'marka:previewDevice';
 const PREVIEW_DEVICE_DEFAULT: 'mobile' | 'tablet' | 'pc' = 'pc';
 
-function isTextEditingTarget(target: EventTarget | null) {
-    return target instanceof HTMLElement && Boolean(target.closest('textarea, input, [contenteditable="true"], [data-swipe-ignore="true"]'));
-}
-
 function loadPreviewDevice(): 'mobile' | 'tablet' | 'pc' {
     try {
         const raw = localStorage.getItem(PREVIEW_DEVICE_STORAGE_KEY);
@@ -156,17 +152,12 @@ function fallbackCopyHtml(html: string): void {
     document.removeEventListener('copy', listener);
 }
 
-type AiEditorStream = { phase: 'idle' | 'connecting' | 'thinking' | 'streaming'; chars: number; connectionMs?: number };
-
-function formatAiConnectionTime(ms?: number) {
-    if (typeof ms !== 'number') return '';
-    return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
-}
+type AiEditorStream = { phase: 'idle' | 'connecting' | 'thinking' | 'streaming'; chars: number };
+const AI_CONNECTING_MS = 1000;
 
 function AiEditorStreamNotice({ state }: { state: AiEditorStream }) {
-    if (state.phase === 'idle') return null;
+    if (state.phase === 'idle' || state.phase === 'thinking') return null;
     const connecting = state.phase === 'connecting';
-    const thinking = state.phase === 'thinking';
 
     return (
         <div className={`pointer-events-none absolute left-1/2 z-[95] -translate-x-1/2 ${connecting ? 'top-8' : 'top-4'}`}>
@@ -184,11 +175,6 @@ function AiEditorStreamNotice({ state }: { state: AiEditorStream }) {
                             </div>
                         </div>
                         <span className="mt-1">正在连接大模型</span>
-                    </>
-                ) : thinking ? (
-                    <>
-                        <span className="h-2 w-2 rounded-full bg-[#0a84ff] dark:bg-[#64aaff]" />
-                        <span>{`已连接模型 · ${formatAiConnectionTime(state.connectionMs)} · 正在思考`}</span>
                     </>
                 ) : (
                     <>
@@ -224,12 +210,12 @@ export default function App() {
     const [activeTheme, setActiveTheme] = useState(THEMES[0].id);
     const [notice, setNotice] = useState<Notice | null>(null);
     const noticeIdRef = useRef(0);
-    const showNotice = (
+    const showNotice = useCallback((
         title: string,
         description: string,
         tone: Notice['tone'],
         action?: Pick<Notice, 'actionLabel' | 'onAction'>
-    ) => setNotice({ id: ++noticeIdRef.current, title, description, tone, ...action });
+    ) => setNotice({ id: ++noticeIdRef.current, title, description, tone, ...action }), []);
     const [aiMarkdownOpen, setAiMarkdownOpen] = useState(false);
     const [aiEditorStream, setAiEditorStream] = useState<AiEditorStream>({ phase: 'idle', chars: 0 });
     const [lastAiRequest, setLastAiRequest] = useState<AiMarkdownRequest | null>(null);
@@ -246,9 +232,15 @@ export default function App() {
     const [splitRatio, setSplitRatio] = useState<number>(loadSplitRatio);
     const [isDraggingDivider, setIsDraggingDivider] = useState(false);
     const [containerWidth, setContainerWidth] = useState(0);
-    const [isDesktop, setIsDesktop] = useState(() =>
-        embedded ? false : (typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches)
-    );
+    const [isDesktop, setIsDesktop] = useState(() => {
+        if (embedded) return false;
+        if (typeof window !== 'undefined') {
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('mobile') === '1') return false;
+            return window.matchMedia('(min-width: 768px)').matches;
+        }
+        return true;
+    });
     const previewRef = useRef<HTMLDivElement>(null);
     const editorScrollRef = useRef<HTMLTextAreaElement>(null);
     const previewOuterScrollRef = useRef<HTMLDivElement>(null);
@@ -258,13 +250,12 @@ export default function App() {
     const scrollSyncLockRef = useRef<'editor' | 'preview' | null>(null);
     const scrollLockReleaseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    const swipeRef = useRef<{ startX: number; startY: number; locked: boolean | 'h' | 'v' }>({ startX: 0, startY: 0, locked: false });
     const [swipeDx, setSwipeDx] = useState(0);
     const [isSwiping, setIsSwiping] = useState(false);
+    const [mobileWidth, setMobileWidth] = useState(0);
     const mobileToolbarRef = useRef<HTMLDivElement>(null);
     const [toolbarCompact, setToolbarCompact] = useState(false);
 
-    // 检测移动端工具栏溢出，动态切换紧凑模式
     useEffect(() => {
         if (isDesktop) return;
         const el = mobileToolbarRef.current;
@@ -277,58 +268,77 @@ export default function App() {
     }, [isDesktop, activePanel, activeTheme]);
 
     const tabIndicatorX = useMemo(() => {
-        const w = typeof window !== 'undefined' ? window.innerWidth : 390;
+        const w = mobileWidth || 390;
         const base = activePanel === 'editor' ? 0 : 1;
         const drag = activePanel === 'editor' ? Math.max(0, Math.min(1, -swipeDx / w)) : -Math.max(0, Math.min(1, swipeDx / w));
         return base + drag;
-    }, [activePanel, swipeDx]);
+    }, [activePanel, swipeDx, mobileWidth]);
 
-    const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    useEffect(() => {
         if (isDesktop) return;
-        if (isTextEditingTarget(e.target)) {
-            swipeRef.current = { startX: 0, startY: 0, locked: 'v' };
-            setSwipeDx(0);
-            setIsSwiping(false);
-            return;
-        }
-        const t = e.touches[0];
-        swipeRef.current = { startX: t.clientX, startY: t.clientY, locked: false };
-        setSwipeDx(0);
-    }, [isDesktop]);
+        const el = mainRef.current;
+        if (!el) return;
 
-    const handleTouchMove = useCallback((e: React.TouchEvent) => {
-        if (isDesktop) return;
-        const s = swipeRef.current;
-        const t = e.touches[0];
-        const dx = t.clientX - s.startX;
-        const dy = t.clientY - s.startY;
+        let startX = 0, startY = 0, locked: boolean | 'h' | 'v' = false, dx = 0, rafId: number | null = null;
 
-        if (!s.locked) {
-            if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
-            s.locked = Math.abs(dx) > Math.abs(dy) ? 'h' : 'v';
-            if (s.locked === 'h') setIsSwiping(true);
-        }
-        if (s.locked === 'h') {
-            e.preventDefault();
-            const clamped = activePanel === 'editor' ? Math.min(0, Math.max(-window.innerWidth, dx)) : Math.min(window.innerWidth, Math.max(0, dx));
-            setSwipeDx(clamped);
-        }
-    }, [isDesktop, activePanel]);
+        const updateWidth = () => { setMobileWidth(el.clientWidth); };
+        const ro = new ResizeObserver(updateWidth);
+        ro.observe(el);
+        updateWidth();
 
-    const handleTouchEnd = useCallback(() => {
-        if (isDesktop) return;
-        const s = swipeRef.current;
-        if (s.locked === 'h') {
-            const threshold = window.innerWidth * 0.2;
-            const dx = swipeDx;
-            if ((activePanel === 'editor' && dx < -threshold) || (activePanel === 'preview' && dx > threshold)) {
-                setActivePanel(activePanel === 'editor' ? 'preview' : 'editor');
+        const onStart = (e: TouchEvent) => {
+            if (e.touches.length !== 1) return;
+            startX = e.touches[0].clientX;
+            startY = e.touches[0].clientY;
+            locked = false; dx = 0;
+            setSwipeDx(0); setIsSwiping(false);
+        };
+
+        const onMove = (e: TouchEvent) => {
+            if (e.touches.length !== 1) return;
+            const t = e.touches[0];
+            const dX = t.clientX - startX, dY = t.clientY - startY;
+            if (!locked) {
+                if (Math.abs(dX) < 8 && Math.abs(dY) < 8) return;
+                locked = Math.abs(dX) > Math.abs(dY) * 1.3 ? 'h' : 'v';
+                if (locked === 'h') setIsSwiping(true);
             }
-            setSwipeDx(0);
-            setIsSwiping(false);
-        }
-        s.locked = false;
-    }, [isDesktop, activePanel, swipeDx]);
+            if (locked === 'h') {
+                e.preventDefault();
+                e.stopPropagation();
+                const w = el.clientWidth;
+                dx = activePanel === 'editor' ? Math.min(0, Math.max(-w, dX)) : Math.min(w, Math.max(0, dX));
+                if (rafId === null) {
+                    rafId = requestAnimationFrame(() => { setSwipeDx(dx); rafId = null; });
+                }
+            }
+        };
+
+        const onEnd = () => {
+            if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+            if (locked === 'h') {
+                const w = el.clientWidth;
+                if (Math.abs(dx) > w * 0.2) setActivePanel(activePanel === 'editor' ? 'preview' : 'editor');
+                setSwipeDx(0); setIsSwiping(false);
+            }
+            locked = false;
+        };
+
+        const moveOpts: AddEventListenerOptions = { passive: false, capture: true };
+        const passiveOpts: AddEventListenerOptions = { passive: true };
+        el.addEventListener('touchstart', onStart, passiveOpts);
+        el.addEventListener('touchmove', onMove, moveOpts);
+        el.addEventListener('touchend', onEnd, passiveOpts);
+        el.addEventListener('touchcancel', onEnd, passiveOpts);
+
+        return () => {
+            ro.disconnect();
+            el.removeEventListener('touchstart', onStart, passiveOpts);
+            el.removeEventListener('touchmove', onMove, moveOpts);
+            el.removeEventListener('touchend', onEnd, passiveOpts);
+            el.removeEventListener('touchcancel', onEnd, passiveOpts);
+        };
+    }, [isDesktop, activePanel]);
 
     const resetScrollSyncLock = useCallback(() => {
         scrollSyncLockRef.current = null;
@@ -386,6 +396,8 @@ export default function App() {
     // 跟踪桌面端断点，用于在移动端隐藏分隔条
     useEffect(() => {
         if (embedded) return;
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('mobile') === '1') return;
         const mq = window.matchMedia('(min-width: 768px)');
         const handler = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
         mq.addEventListener('change', handler);
@@ -410,7 +422,7 @@ export default function App() {
 
     // 基于当前容器宽度与预览模式计算动态边界
     const previewMinPx = PREVIEW_MIN_PX_BY_DEVICE[previewDevice];
-    const ratioBounds = computeRatioBounds(containerWidth, previewMinPx);
+    const ratioBounds = useMemo(() => computeRatioBounds(containerWidth, previewMinPx), [containerWidth, previewMinPx]);
 
     // 容器宽度变化（如窗口缩放）时，若已保存的 ratio 越界则自动收回
     // 初始化阶段 containerWidth 为 0，ratioBounds 为默认值 {DEFAULT,DEFAULT}，
@@ -418,7 +430,7 @@ export default function App() {
     useEffect(() => {
         if (containerWidth <= 0) return;
         setSplitRatio((prev) => clampRatio(prev, ratioBounds));
-    }, [ratioBounds.min, ratioBounds.max, containerWidth]);
+    }, [containerWidth, ratioBounds]);
 
     // 中轴线拖拽：基于指针在 main 容器内的水平位置计算新比例
     const handleDividerPointerDown = useCallback((e: React.PointerEvent) => {
@@ -506,6 +518,20 @@ export default function App() {
         const previous = markdownInput;
         const previousAiState = hasAiGeneratedContent;
         let streamed = '';
+        let connectingDone = false;
+        let firstDeltaReceived = false;
+        let streamActive = true;
+
+        const showStreamedText = () => {
+            if (!streamActive || controller.signal.aborted || !connectingDone || !firstDeltaReceived || !streamed) return;
+            setMarkdownInput(streamed);
+            setAiEditorStream({ phase: 'streaming', chars: streamed.length });
+        };
+
+        const showThinking = () => {
+            if (!streamActive || controller.signal.aborted || !connectingDone || firstDeltaReceived) return;
+            setAiEditorStream({ phase: 'thinking', chars: 0 });
+        };
 
         aiStreamAbortRef.current = controller;
         setLastAiRequest(request);
@@ -515,19 +541,28 @@ export default function App() {
         setMarkdownInput('');
         setHasAiGeneratedContent(false);
         setAiEditorStream({ phase: 'connecting', chars: 0 });
+        const connectingDelay = new Promise<void>(resolve => {
+            window.setTimeout(resolve, AI_CONNECTING_MS);
+        }).then(() => {
+            connectingDone = true;
+            if (firstDeltaReceived) showStreamedText();
+            else showThinking();
+        });
 
         try {
             const markdown = await streamAiMarkdown(request, {
                 signal: controller.signal,
-                onConnected: (connectionMs) => {
-                    setAiEditorStream({ phase: 'thinking', chars: 0, connectionMs });
+                onConnected: () => {
+                    showThinking();
                 },
                 onDelta: (delta) => {
                     streamed += delta;
-                    setMarkdownInput(streamed);
-                    setAiEditorStream({ phase: 'streaming', chars: streamed.length });
+                    firstDeltaReceived = true;
+                    showStreamedText();
                 },
             });
+            await connectingDelay;
+            if (controller.signal.aborted) throw new DOMException('Aborted', 'AbortError');
             const cleaned = cleanAiMarkdown(markdown || streamed);
             if (!cleaned) throw new Error('模型没有返回 Markdown 内容');
 
@@ -546,8 +581,10 @@ export default function App() {
             });
         } catch (err) {
             if (err instanceof DOMException && err.name === 'AbortError') {
+                const visiblePartial = connectingDone && firstDeltaReceived ? streamed : '';
+                setMarkdownInput(visiblePartial);
                 setAiEditorStream({ phase: 'idle', chars: 0 });
-                setHasAiGeneratedContent(Boolean(streamed.trim()));
+                setHasAiGeneratedContent(Boolean(visiblePartial.trim()));
                 setAiStreamInterrupted(true);
                 return;
             }
@@ -557,6 +594,7 @@ export default function App() {
             setAiEditorStream({ phase: 'idle', chars: 0 });
             showNotice('生成失败', err instanceof Error ? err.message : 'AI 生成失败，请稍后重试', 'error');
         } finally {
+            streamActive = false;
             if (aiStreamAbortRef.current === controller) aiStreamAbortRef.current = null;
         }
     }, [hasAiGeneratedContent, markdownInput, showNotice]);
@@ -667,7 +705,7 @@ export default function App() {
 
     const regenerateAiStream = useCallback(() => {
         if (lastAiRequest) void streamReplaceAiMarkdown(lastAiRequest);
-    }, [lastAiRequest]);
+    }, [lastAiRequest, streamReplaceAiMarkdown]);
 
     const isAiStreaming = aiEditorStream.phase !== 'idle';
     const editorClearAction = !isAiStreaming && hasAiGeneratedContent && markdownInput.trim().length > 0 ? requestClearEditor : undefined;
@@ -916,7 +954,7 @@ export default function App() {
                                 onClearRequest={editorClearAction}
                                 onAbortStream={isAiStreaming ? abortAiStream : undefined}
                                 onRegenerateStream={canRegenerateStream ? regenerateAiStream : undefined}
-                                thinkingConnectionMs={aiEditorStream.phase === 'thinking' ? aiEditorStream.connectionMs : undefined}
+                                isThinking={aiEditorStream.phase === 'thinking'}
                                 immersive={isImmersive}
                             />
                         </div>
@@ -949,11 +987,8 @@ export default function App() {
                 {!isDesktop && (
                     <div
                         className="w-[200%] h-full flex flex-nowrap"
-                        onTouchStart={handleTouchStart}
-                        onTouchMove={handleTouchMove}
-                        onTouchEnd={handleTouchEnd}
                         style={{
-                            transform: `translateX(${(activePanel === 'editor' ? 0 : -(typeof window !== 'undefined' ? window.innerWidth : 0)) + swipeDx}px)`,
+                            transform: `translateX(${(activePanel === 'editor' ? 0 : -mobileWidth) + swipeDx}px)`,
                             transition: isSwiping ? 'none' : 'transform 0.35s cubic-bezier(0.32, 0.72, 0, 1)',
                             touchAction: 'pan-y',
                         }}
@@ -969,7 +1004,7 @@ export default function App() {
                                 onClearRequest={editorClearAction}
                                 onAbortStream={isAiStreaming ? abortAiStream : undefined}
                                 onRegenerateStream={canRegenerateStream ? regenerateAiStream : undefined}
-                                thinkingConnectionMs={aiEditorStream.phase === 'thinking' ? aiEditorStream.connectionMs : undefined}
+                                isThinking={aiEditorStream.phase === 'thinking'}
                                 immersive={isImmersive}
                             />
                         </div>
@@ -1002,7 +1037,7 @@ export default function App() {
                     data-testid="immersive-exit"
                     onClick={() => setIsImmersive(false)}
                     className="fixed top-3 right-3 z-[200] inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-white/85 dark:bg-[#1c1c1e]/85 backdrop-blur-md text-[12px] font-medium text-[#1d1d1f] dark:text-white shadow-[0_4px_20px_rgba(0,0,0,0.12)] border border-black/[0.08] dark:border-white/[0.1] transition-colors hover:bg-white dark:hover:bg-[#2c2c2e] active:scale-95"
-                    title="退出沉浸编辑（ESC）"
+                    data-tooltip="退出沉浸编辑（ESC）"
                 >
                     <Minimize2 size={13} />
                     <span className="hidden sm:inline">退出沉浸</span>

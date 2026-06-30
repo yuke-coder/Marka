@@ -10,9 +10,11 @@ import {
     aiMarkdownSpeeds,
     aiReasoningEfforts,
     cleanAiMarkdown,
+    fetchAiMarkdownModels,
     streamAiMarkdown,
     type AiApplyMode,
     type AiMarkdownModel,
+    type AiMarkdownModelOption,
     type AiMarkdownRequest,
     type AiMarkdownMode,
     type AiMarkdownTask,
@@ -126,10 +128,10 @@ function removeMarkdownFormatting(markdown: string) {
     text = text.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
     text = text.replace(/\[([^\]]+)\]\[[^\]]*\]/g, '$1');
     text = text.replace(/^\s{0,3}\[[^\]]+\]:\s+\S+.*$/gm, '');
-    text = text.replace(/`{1,2}([^`]+)`{1,2}/g, '$1');
+    text = text.replace(/`{1,3}([^`]+)`{1,3}/g, '$1');
     text = text.replace(/~~([^~]+)~~/g, '$1');
 
-    for (let i = 0; i < 2; i += 1) {
+    for (let i = 0; i < 3; i += 1) {
         text = text
             .replace(/(\*\*\*|___)(.*?)\1/g, '$2')
             .replace(/(\*\*|__)(.*?)\1/g, '$2')
@@ -138,12 +140,48 @@ function removeMarkdownFormatting(markdown: string) {
 
     text = text
         .replace(/<br\s*\/?>/gi, '\n')
-        .replace(/<\/?(?:p|div|h[1-6]|li|blockquote)[^>]*>/gi, '\n')
+        .replace(/<\/?(?:p|div|h[1-6]|li|blockquote|section|article|header|footer|aside|main|nav|pre|code|table|tr|td|th|thead|tbody|tfoot|ul|ol|dl|dt|dd|figure|figcaption|details|summary)[^>]*>/gi, '\n')
         .replace(/<[^>]+>/g, '');
 
-    return decodeHtmlEntities(text)
+    text = decodeHtmlEntities(text);
+
+    text = text.replace(/\[\/?(?:b|i|u|s|strike|del|ins|em|strong|code|pre|quote|color|size|font|url|img|email|list|ul|ol|li|table|tr|td|th|align|center|left|right|justify|indent|sub|sup|spoiler|php|html|youtube|media)(?:=[^\]]*)?\]/gi, '');
+
+    text = text.replace(
+        // eslint-disable-next-line no-control-regex
+        /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u00AD\u0600-\u0605\u061C\u06DD\u070F\u08E2\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\uFEFF\uFFF9-\uFFFB]|\uD834[\uDD73-\uDD7A]|\uDB40[\uDC01-\uDC7F]/g,
+        ''
+    );
+
+    text = text.replace(
+        /[\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000\uFEFF]/g,
+        ' '
+    );
+
+    text = text.replace(
+        // eslint-disable-next-line no-misleading-character-class
+        /[\p{Emoji}\p{Emoji_Presentation}\p{Extended_Pictographic}\p{Emoji_Modifier_Base}\p{Emoji_Modifier}\p{Emoji_Component}\u{FE0F}\u{200D}\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{1F300}-\u{1FAFF}\u{2300}-\u{23FF}\u{2B00}-\u{2BFF}\u{2190}-\u{21FF}\u{2200}-\u{22FF}\u{25A0}-\u{25FF}\u{2700}-\u{27BF}\u{2900}-\u{297F}\u{2B00}-\u{2BFF}]/gu,
+        ''
+    );
+
+    text = text.replace(
+        // eslint-disable-next-line no-useless-escape
+        /(?:[:;=8xX><][\-o\*'"]?[\)\]\(\[dDpP/\\:@|3}><{oO0\*vV]|[\)\]\(\[dDpP/\\:@|3}><{oO0\*vV][\-o\*'"]?[:;=8xX><]|<\/?3|:\*|:-[\/\\]|:\(|\^_\^|\^-\^|T_T|T\.T|-_-|\.-\)|:-[)D]|:-\(|:'-\(|XD|xD|XP|xp|O\.o|o\.O|:3|=\)|=\(|OwO|owo|UwU|uwu|QwQ|qwq|QAQ|qaq)/g,
+        ''
+    );
+
+    text = text.replace(
+        /(?:https?:\/\/|www\.)[^\s<>")\]]+/gi,
+        ''
+    );
+
+    text = text.replace(/�/g, '');
+
+    return text
         .replace(/[ \t]+\n/g, '\n')
         .replace(/\n{3,}/g, '\n\n')
+        .replace(/[^\S\n]{2,}/g, ' ')
+        .replace(/^[ \t]+|[ \t]+$/gm, '')
         .trim();
 }
 
@@ -168,7 +206,10 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [settingsSubmenu, setSettingsSubmenu] = useState<null | 'model' | 'speed'>(null);
     const [settingsSubmenuOffset, setSettingsSubmenuOffset] = useState(-10);
+    const [modelOptions, setModelOptions] = useState<AiMarkdownModelOption[]>(aiMarkdownModels);
+    const [isLoadingModels, setIsLoadingModels] = useState(false);
     const [sheetHeight, setSheetHeight] = useState(88);
+    const [isFullscreen, setIsFullscreen] = useState(false);
     const [modeDrag, setModeDrag] = useState(0);
     const [isModeDragging, setIsModeDragging] = useState(false);
 
@@ -183,11 +224,16 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
     const modeTipStartedAtRef = useRef(0);
     const modeTipRemainingRef = useRef(MODE_TIP_DURATION);
     const modeSwipeRef = useRef<{ startX: number; startY: number; locked: false | 'h' | 'v' }>({ startX: 0, startY: 0, locked: false });
+    const showNoticeRef = useRef(showNotice);
 
     const isGenerating = phase === 'generating';
     const canGenerate = hasSourceText && !isGenerating;
     const showOutput = phase !== 'idle' || Boolean(result);
     const prefersReducedMotion = useReducedMotion();
+
+    useEffect(() => {
+        showNoticeRef.current = showNotice;
+    }, [showNotice]);
 
     useEffect(() => {
         if (!isOpen) {
@@ -197,9 +243,39 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
             setSettingsSubmenu(null);
             setSettingsSubmenuOffset(-10);
             setModeTip(null);
+            setIsFullscreen(false);
+            setSheetHeight(88);
             if (modeTipTimerRef.current) window.clearTimeout(modeTipTimerRef.current);
             setIsModeTipPaused(false);
         }
+    }, [isOpen]);
+
+    useEffect(() => {
+        if (!isOpen) return;
+        let alive = true;
+        setIsLoadingModels(true);
+
+        fetchAiMarkdownModels()
+            .then((models) => {
+                if (!alive) return;
+                if (!models.length) {
+                    showNoticeRef.current('模型列表为空', '当前 OpenAI 账号没有返回可用于文本生成的模型', 'error');
+                    return;
+                }
+                setModelOptions(models);
+                setModel(current => models.some(item => item.id === current) ? current : models[0].id);
+            })
+            .catch((err) => {
+                if (!alive) return;
+                showNoticeRef.current('模型列表获取失败', err instanceof Error ? err.message : '请检查网络、代理或 API Key', 'error');
+            })
+            .finally(() => {
+                if (alive) setIsLoadingModels(false);
+            });
+
+        return () => {
+            alive = false;
+        };
     }, [isOpen]);
 
     useEffect(() => () => {
@@ -282,7 +358,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
 
     const clearExtraFormatting = useCallback(() => {
         setExtraInstruction(prev => removeMarkdownFormatting(prev));
-        showNotice('已清除格式', '已移除额外要求中的 Markdown 标记', 'success');
+        showNotice('已清除格式', '已移除所有格式标记，仅保留纯文本', 'success');
     }, [showNotice]);
 
     const clearSourceText = useCallback(() => {
@@ -302,27 +378,52 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
         const plainText = removeMarkdownFormatting(currentValue);
         if (textarea) textarea.value = plainText;
         syncSourceText(plainText);
-        showNotice('已清除格式', '已移除 Markdown 标记，仅保留纯文本', 'success');
+        showNotice('已清除格式', '已移除所有格式标记，仅保留纯文本', 'success');
     }, [showNotice, syncSourceText]);
 
     const handleSheetPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+        if (isFullscreen) return;
+        event.preventDefault();
         const startY = event.clientY;
         const startHeight = sheetHeight;
+        let velocity = 0;
+        let lastY = startY;
+        let lastTime = Date.now();
+        let shouldExpand = false;
+        let currentHeight = startHeight;
 
         const onMove = (moveEvent: PointerEvent) => {
-            const next = startHeight + ((startY - moveEvent.clientY) / window.innerHeight) * 100;
-            setSheetHeight(Math.max(50, Math.min(94, next)));
+            const now = Date.now();
+            const dt = Math.max(1, now - lastTime);
+            const dy = lastY - moveEvent.clientY;
+            velocity = dy / dt;
+
+            lastY = moveEvent.clientY;
+            lastTime = now;
+
+            const deltaY = startY - moveEvent.clientY;
+            const next = startHeight + (deltaY / window.innerHeight) * 100;
+            currentHeight = Math.max(50, Math.min(94, next));
+
+            if (currentHeight >= 90 || (velocity > 0.5 && currentHeight >= 85)) {
+                shouldExpand = true;
+            }
+
+            setSheetHeight(currentHeight);
         };
         const onUp = () => {
             window.removeEventListener('pointermove', onMove);
             window.removeEventListener('pointerup', onUp);
             window.removeEventListener('pointercancel', onUp);
+            if (shouldExpand || currentHeight >= 90) {
+                setIsFullscreen(true);
+            }
         };
 
         window.addEventListener('pointermove', onMove);
         window.addEventListener('pointerup', onUp);
         window.addEventListener('pointercancel', onUp);
-    }, [sheetHeight]);
+    }, [sheetHeight, isFullscreen]);
 
     const startModeTipTimer = useCallback((id: number, delay: number) => {
         if (modeTipTimerRef.current) window.clearTimeout(modeTipTimerRef.current);
@@ -455,10 +556,26 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
         }
     }, [currentMarkdown, extraInstruction, followup, mode, model, onApply, reasoningEffort, result, showNotice, speed]);
 
+    const startStreamReplace = useCallback(() => {
+        onStreamReplace({
+            mode,
+            model,
+            reasoningEffort,
+            speed,
+            task: 'generate',
+            sourceText: sourceTextareaRef.current?.value ?? sourceTextRef.current,
+            extraInstruction,
+        });
+    }, [extraInstruction, mode, model, onStreamReplace, reasoningEffort, speed]);
+
     const askConfirm = useCallback(() => {
         if (!canGenerate) return;
+        if (!currentMarkdown.trim()) {
+            startStreamReplace();
+            return;
+        }
         setConfirmingReplace(true);
-    }, [canGenerate]);
+    }, [canGenerate, currentMarkdown, startStreamReplace]);
 
     const renderModeSwitch = (mobile = false) => {
         const activeIndex = mode === 'format' ? 0 : 1;
@@ -544,7 +661,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
     };
 
     const changeModel = (next: AiMarkdownModel) => {
-        const item = aiMarkdownModels.find(option => option.id === next);
+        const item = modelOptions.find(option => option.id === next);
         if (!item) {
             showNotice('修改失败', '未找到对应的模型配置', 'error');
             return;
@@ -574,17 +691,18 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
     };
 
     const renderSettingsControl = ({ mobile = false }: { mobile?: boolean } = {}) => {
-        const selectedModel = aiMarkdownModels.find(item => item.id === model) ?? aiMarkdownModels[0];
+        const selectedModel = modelOptions.find(item => item.id === model) ?? modelOptions[0] ?? aiMarkdownModels[0];
         const selectedSpeed = aiMarkdownSpeeds.find(item => item.id === speed) ?? aiMarkdownSpeeds[0];
         const interactiveStateClass = mobile
             ? 'active:bg-black/[0.06] dark:active:bg-white/[0.115]'
             : 'hover:bg-black/[0.06] focus-visible:bg-black/[0.06] dark:hover:bg-white/[0.115] dark:focus-visible:bg-white/[0.115]';
         const menuItemClass = `flex min-h-7 w-full items-center justify-between gap-3 rounded-[7px] px-2 py-1 text-left text-[12px] font-medium text-[#1d1d1f] transition-colors focus-visible:outline-none dark:text-[#f5f5f7] ${interactiveStateClass}`;
         const selectedItemClass = 'bg-black/[0.06] dark:bg-white/[0.115]';
-        const submenuBaseClass = `absolute left-full z-[260] ml-1 ${mobile ? 'w-48' : 'w-56'} rounded-xl bg-white p-1 shadow-[0_18px_46px_rgba(15,23,42,0.18)] ring-1 ring-black/[0.08] dark:bg-[#2d2d2f]/95 dark:shadow-[0_18px_46px_rgba(0,0,0,0.34)] dark:ring-white/[0.08] dark:backdrop-blur-xl`;
+        const submenuBaseClass = `absolute left-full z-[260] ml-1 ${mobile ? 'w-48' : 'w-56'} max-h-[min(360px,calc(100vh-16px))] overflow-y-auto rounded-xl bg-white p-1 shadow-[0_18px_46px_rgba(15,23,42,0.18)] ring-1 ring-black/[0.08] dark:bg-[#2d2d2f]/95 dark:shadow-[0_18px_46px_rgba(0,0,0,0.34)] dark:ring-white/[0.08] dark:backdrop-blur-xl`;
         const desktopSubmenuClass = `invisible opacity-0 transition-opacity group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100 ${submenuBaseClass}`;
         const mobileSubmenuClass = submenuBaseClass;
         const menuWidthClass = mobile ? 'w-44' : 'w-52';
+        const modelSubmenuHeight = Math.min(360, 31 + Math.max(modelOptions.length, 1) * 30);
 
         return (
             <div
@@ -644,15 +762,15 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                             <div className={mobile ? 'relative' : 'group relative'}>
                                 <button
                                     type="button"
-                                    onMouseEnter={(event) => !mobile && openSettingsSubmenu('model', event.currentTarget, 120)}
-                                    onFocus={(event) => !mobile && openSettingsSubmenu('model', event.currentTarget, 120)}
+                                    onMouseEnter={(event) => !mobile && openSettingsSubmenu('model', event.currentTarget, modelSubmenuHeight)}
+                                    onFocus={(event) => !mobile && openSettingsSubmenu('model', event.currentTarget, modelSubmenuHeight)}
                                     onClick={(event) => {
                                         if (!mobile) return;
                                         if (settingsSubmenu === 'model') {
                                             setSettingsSubmenu(null);
                                             return;
                                         }
-                                        openSettingsSubmenu('model', event.currentTarget, 120);
+                                        openSettingsSubmenu('model', event.currentTarget, modelSubmenuHeight);
                                     }}
                                     className={`${menuItemClass} ${mobile && settingsSubmenu === 'model' ? selectedItemClass : 'bg-black/[0.04] dark:bg-white/5'}`}
                                 >
@@ -664,7 +782,9 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                                     style={{ top: settingsSubmenuOffset }}
                                 >
                                     <div className="px-2 pb-1 pt-1 text-[12px] font-semibold text-[#69707d] dark:text-[#a1a1a6]">模型</div>
-                                    {aiMarkdownModels.map(item => (
+                                    {isLoadingModels ? (
+                                        <div className="px-2 py-1.5 text-[12px] font-medium text-[#69707d] dark:text-[#a1a1a6]">正在获取模型...</div>
+                                    ) : modelOptions.map(item => (
                                         <button
                                             key={item.id}
                                             type="button"
@@ -771,7 +891,6 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
             <>
                 <button onClick={onClose} className={gb}>取消</button>
                 <button onClick={askConfirm} disabled={!canGenerate} className={pb}>
-                    <Sparkles size={iconSize} />
                     生成 Markdown
                 </button>
             </>
@@ -1039,11 +1158,10 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                     <button
                         onClick={() => {
                             setConfirmingReplace(false);
-                            onStreamReplace({ mode, model, reasoningEffort, speed, task: 'generate', sourceText: sourceTextareaRef.current?.value ?? sourceTextRef.current, extraInstruction });
+                            startStreamReplace();
                         }}
                         className={primaryButton}
                     >
-                        <Sparkles size={13} />
                         确认生成
                     </button>
                 </div>
@@ -1129,11 +1247,12 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                     <motion.div
                         data-testid="ai-overlay"
                         initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
+                        animate={{ opacity: isFullscreen ? 0 : 1 }}
                         exit={{ opacity: 0 }}
-                        transition={{ duration: 0.18 }}
-                        onClick={() => !isGenerating && onClose()}
+                        transition={{ duration: prefersReducedMotion ? 0.1 : 0.3, ease: [0.25, 0.1, 0.25, 1] }}
+                        onClick={() => !isGenerating && !isFullscreen && onClose()}
                         className="fixed inset-0 z-[200] bg-black/30 backdrop-blur-sm dark:bg-black/50"
+                        style={{ pointerEvents: isFullscreen ? 'none' : 'auto' }}
                     />
 
                     {isDesktop ? (
@@ -1168,16 +1287,40 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                         <motion.div
                             data-testid="ai-mobile-sheet"
                             initial={{ opacity: 0, y: '100%' }}
-                            animate={{ opacity: 1, y: 0 }}
+                            animate={{
+                                opacity: 1,
+                                y: 0,
+                                top: isFullscreen ? 0 : 'auto',
+                                bottom: 0,
+                                left: 0,
+                                right: 0,
+                                height: isFullscreen ? '100vh' : `${sheetHeight}vh`,
+                                borderTopLeftRadius: isFullscreen ? 0 : 14,
+                                borderTopRightRadius: isFullscreen ? 0 : 14,
+                            }}
                             exit={{ opacity: 0, y: '100%' }}
-                            transition={{ duration: 0.24, ease: [0.25, 0.1, 0.25, 1] }}
-                            className="fixed inset-x-0 bottom-0 z-[201] grid overflow-hidden rounded-t-lg bg-[#fbfcfe] shadow-[0_-22px_64px_rgba(15,23,42,0.2)] dark:bg-[#1c1c1e]"
-                            style={{ height: `${sheetHeight}vh`, gridTemplateRows: 'auto minmax(0, 1fr) minmax(26px, 0.1fr)', '--sh': `${sheetHeight}vh` } as React.CSSProperties}
+                            transition={isFullscreen
+                                ? {
+                                    duration: prefersReducedMotion ? 0.1 : 0.4,
+                                    ease: [0.32, 0.72, 0, 1],
+                                    height: { duration: prefersReducedMotion ? 0.1 : 0.4, ease: [0.32, 0.72, 0, 1] },
+                                    borderTopLeftRadius: { duration: prefersReducedMotion ? 0.1 : 0.3, ease: 'easeOut' },
+                                    borderTopRightRadius: { duration: prefersReducedMotion ? 0.1 : 0.3, ease: 'easeOut' },
+                                }
+                                : { duration: prefersReducedMotion ? 0.05 : 0.12, ease: [0.25, 0.1, 0.25, 1] }
+                            }
+                            className={`fixed z-[201] grid overflow-hidden bg-[#fbfcfe] shadow-[0_-22px_64px_rgba(15,23,42,0.2)] dark:bg-[#1c1c1e] will-change-transform`}
+                            style={{
+                                gridTemplateRows: 'auto minmax(0, 1fr) minmax(26px, 0.1fr)',
+                                '--sh': isFullscreen ? '100vh' : `${sheetHeight}vh`,
+                            } as React.CSSProperties}
                         >
-                            <header className="px-4 pb-2 pt-2">
-                                <div className="flex touch-none justify-center pb-2" onPointerDown={handleSheetPointerDown}>
-                                    <span className="h-1.5 w-12 cursor-row-resize rounded bg-[#b7bcc5] dark:bg-[#5a5a5f]" />
-                                </div>
+                            <header className={`px-4 pb-2 ${isFullscreen ? 'pt-[max(env(safe-area-inset-top),16px)]' : 'pt-2'}`}>
+                                {!isFullscreen && (
+                                    <div className="flex touch-none justify-center pb-2" onPointerDown={handleSheetPointerDown}>
+                                        <span className="h-1.5 w-12 cursor-row-resize rounded bg-[#b7bcc5] dark:bg-[#5a5a5f]" />
+                                    </div>
+                                )}
                                 <div className="mb-2 flex items-center justify-between gap-3">
                                     <div className="min-w-0">
                                         <div className="flex min-w-0 items-center gap-2">
@@ -1192,11 +1335,11 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                                 </div>
                                 {renderModeSwitch(true)}
                             </header>
-                            <main className="flex min-h-0 flex-col gap-3 overflow-y-auto scroll-touch px-4 py-3">
+                            <main className="flex min-h-0 flex-col gap-3 overflow-y-auto overscroll-contain px-4 py-3">
                                 {mobileInputPane}
                                 {showOutput && renderOutputPane()}
                             </main>
-                            <footer className="flex h-full min-h-0 items-center justify-end gap-[clamp(3px,calc(var(--sh)*0.012),10px)] bg-[#fbfcfe]/96 px-[clamp(10px,calc(var(--sh)*0.02),16px)] py-[clamp(3px,calc(var(--sh)*0.015),12px)] shadow-[0_-14px_26px_rgba(15,23,42,0.06)] backdrop-blur dark:bg-[#1c1c1e]/95 dark:shadow-[0_-14px_26px_rgba(0,0,0,0.18)]">
+                            <footer className={`flex h-full min-h-0 items-center justify-end gap-[clamp(3px,calc(var(--sh)*0.012),10px)] bg-[#fbfcfe]/96 px-[clamp(10px,calc(var(--sh)*0.02),16px)] py-[clamp(3px,calc(var(--sh)*0.015),12px)] shadow-[0_-14px_26px_rgba(15,23,42,0.06)] backdrop-blur dark:bg-[#1c1c1e]/95 dark:shadow-[0_-14px_26px_rgba(0,0,0,0.18)] ${isFullscreen ? 'pb-[max(env(safe-area-inset-bottom),16px)]' : ''}`}>
                                 {renderActions({ compact: true })}
                             </footer>
                         </motion.div>

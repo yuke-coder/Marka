@@ -116,7 +116,7 @@ export function DesktopToolbar({
                     data-testid="device-mobile"
                     onClick={() => onDeviceChange('mobile')}
                     className={`${segBtn} ${previewDevice === 'mobile' ? segOn : segOff}`}
-                    title="手机预览"
+                    data-tooltip="手机预览"
                     aria-pressed={previewDevice === 'mobile'}
                 >
                     <Smartphone size={13} />
@@ -125,7 +125,7 @@ export function DesktopToolbar({
                     data-testid="device-tablet"
                     onClick={() => onDeviceChange('tablet')}
                     className={`${segBtn} ${previewDevice === 'tablet' ? segOn : segOff}`}
-                    title="平板预览"
+                    data-tooltip="平板预览"
                     aria-pressed={previewDevice === 'tablet'}
                 >
                     <Tablet size={13} />
@@ -134,7 +134,7 @@ export function DesktopToolbar({
                     data-testid="device-pc"
                     onClick={() => onDeviceChange('pc')}
                     className={`${segBtn} ${previewDevice === 'pc' ? segOn : segOff}`}
-                    title="桌面预览"
+                    data-tooltip="桌面预览"
                     aria-pressed={previewDevice === 'pc'}
                 >
                     <Monitor size={13} />
@@ -145,7 +145,7 @@ export function DesktopToolbar({
                 data-testid="scroll-sync-toggle"
                 onClick={onToggleScrollSync}
                 className={`${tb} ${scrollSyncEnabled ? active : idle}`}
-                title={scrollSyncEnabled ? '关闭滚动同步' : '开启滚动同步'}
+                data-tooltip={scrollSyncEnabled ? '关闭滚动同步' : '开启滚动同步'}
             >
                 {scrollSyncEnabled ? <Link2 size={13} /> : <Unlink2 size={13} />}
                 <span className="hidden md:inline">同步滚动</span>
@@ -157,7 +157,7 @@ export function DesktopToolbar({
                 data-testid="copy-markdown-button"
                 onClick={onCopyMarkdown}
                 className={`${tb} ${idle}`}
-                title="复制 Markdown 源码到剪贴板"
+                data-tooltip="复制 Markdown 源码到剪贴板"
             >
                 <FileText size={13} />
                 <span className="hidden sm:inline">复制 MD</span>
@@ -193,7 +193,7 @@ export function MobileToolbar({
                 data-testid="export-pdf"
                 onClick={onExportPdf}
                 className={`${iconCls} ${idle}`}
-                title="导出 PDF"
+                data-tooltip="导出 PDF"
             >
                 <FileType2 size={iconSize} />
             </button>
@@ -201,7 +201,7 @@ export function MobileToolbar({
                 data-testid="export-html"
                 onClick={onExportHtml}
                 className={`${iconCls} ${idle}`}
-                title="导出 HTML"
+                data-tooltip="导出 HTML"
             >
                 <FileCode2 size={iconSize} />
             </button>
@@ -209,7 +209,7 @@ export function MobileToolbar({
                 data-testid="export-md"
                 onClick={onExportMarkdown}
                 className={`${iconCls} ${idle}`}
-                title="导出 Markdown"
+                data-tooltip="导出 Markdown"
             >
                 <FileText size={iconSize} />
             </button>
@@ -217,7 +217,7 @@ export function MobileToolbar({
                 data-testid="copy-markdown-button"
                 onClick={onCopyMarkdown}
                 className={`flex items-center justify-center flex-auto ${compact ? 'h-7 gap-0.5 px-1 text-[10px]' : 'h-8 gap-1 px-2 text-[11px]'} min-w-0 rounded-lg font-medium transition-all duration-150 border select-none whitespace-nowrap touch-manipulation active:scale-95 ${idle}`}
-                title="复制 Markdown 源码"
+                data-tooltip="复制 Markdown 源码"
             >
                 <FileText size={compact ? 12 : 13} className="shrink-0" />
                 {!compact && <span>复制 MD</span>}

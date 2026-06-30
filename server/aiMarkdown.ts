@@ -15,20 +15,27 @@ interface AiMarkdownBody {
 }
 
 const OPENAI_API_URL = 'https://api.openai.com/v1/responses';
+const OPENAI_MODELS_URL = 'https://api.openai.com/v1/models';
 const DEFAULT_MODEL = 'gpt-5.4-nano';
 const DEFAULT_REASONING_EFFORT = 'low';
-const SELECTABLE_MODELS = new Set([
-    'gpt-5.5',
-    'gpt-5.5-pro',
-    'gpt-5.4',
-    'gpt-5.4-pro',
-    'gpt-5.4-mini',
-    'gpt-5.4-nano',
-    'gpt-5.3-codex-spark',
-]);
-const SELECTABLE_REASONING_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh']);
-const SELECTABLE_SPEEDS = new Set(['standard', 'fast']);
+const MODEL_OPTIONS = [
+    { id: 'gpt-5.5', label: 'GPT-5.5', shortLabel: '5.5' },
+    { id: 'gpt-5.4', label: 'GPT-5.4', shortLabel: '5.4' },
+    { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini', shortLabel: '5.4 Mini' },
+    { id: 'gpt-5.4-nano', label: 'GPT-5.4 Nano', shortLabel: '5.4 Nano' },
+] as const;
+const SELECTABLE_REASONING_EFFORTS: Set<string> = new Set(['low', 'medium', 'high', 'xhigh']);
+const SELECTABLE_SPEEDS: Set<string> = new Set(['standard', 'fast']);
+const MODELS_CACHE_MS = 5 * 60 * 1000;
+const SELECTABLE_MODELS: Set<string> = new Set(MODEL_OPTIONS.map(option => option.id));
 let proxyReady = false;
+let availableModelsCache: { expiresAt: number; models: ModelOption[] } | null = null;
+
+interface ModelOption {
+    id: string;
+    label: string;
+    shortLabel: string;
+}
 
 function readEnv(name: string) {
     const value = process.env[name]?.trim() || '';
@@ -45,6 +52,66 @@ function setupProxy() {
 function sendJson(res: ServerResponse, status: number, data: unknown) {
     res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify(data));
+}
+
+async function readAvailableModelIds(apiKey: string) {
+    setupProxy();
+    const response = await fetch(OPENAI_MODELS_URL, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+    });
+
+    if (!response.ok) throw new Error(`OpenAI models request failed: ${response.status}`);
+
+    const data = await response.json();
+    return new Set<string>(
+        Array.isArray(data?.data)
+            ? data.data.map((model: { id?: unknown }) => model.id).filter((id: unknown): id is string => typeof id === 'string')
+            : []
+    );
+}
+
+async function getAvailableModels(apiKey: string) {
+    const now = Date.now();
+    if (availableModelsCache && availableModelsCache.expiresAt > now) return availableModelsCache.models;
+
+    const availableIds = await readAvailableModelIds(apiKey);
+    const models = MODEL_OPTIONS
+        .filter(option => availableIds.has(option.id))
+        .map(option => ({ ...option }));
+
+    availableModelsCache = { expiresAt: now + MODELS_CACHE_MS, models };
+    return models;
+}
+
+function normalizeReasoningEffort(effort: string) {
+    if (effort === 'xhigh') return 'high';
+    return effort;
+}
+
+function supportsReasoningControls(model: string) {
+    if (/chat/i.test(model)) return false;
+    return /^gpt-5(?:[.-]|$)/i.test(model) || /^o[1-9](?:[.-]|$)/i.test(model);
+}
+
+function buildOpenAIRequestBody(args: {
+    model: string;
+    reasoningEffort: string;
+    speed: string;
+    mode: AiMarkdownMode;
+    task: AiMarkdownTask;
+    sourceText: string;
+    extraInstruction: string;
+}) {
+    const body: Record<string, unknown> = {
+        model: args.model,
+        stream: true,
+        instructions: buildInstructions(args.mode, args.task),
+        input: buildInput(args),
+    };
+
+    if (supportsReasoningControls(args.model)) body.reasoning = { effort: normalizeReasoningEffort(args.reasoningEffort) };
+    if (args.speed === 'fast') body.service_tier = 'auto';
+    return body;
 }
 
 async function readOpenAIError(upstream: Response) {
@@ -141,14 +208,29 @@ function buildInput(body: { task: AiMarkdownTask; sourceText: string; extraInstr
 }
 
 export async function handleAiMarkdownRequest(req: IncomingMessage, res: ServerResponse) {
-    if (req.method !== 'POST') {
-        sendJson(res, 405, { error: '仅支持 POST 请求' });
-        return;
-    }
-
     const apiKey = readEnv('OPENAI_API_KEY');
     if (!apiKey) {
         sendJson(res, 500, { error: '缺少 OPENAI_API_KEY 环境变量' });
+        return;
+    }
+
+    if (req.method === 'GET') {
+        try {
+            const models = await getAvailableModels(apiKey);
+            if (!models.length) {
+                sendJson(res, 502, { error: '当前 OpenAI 账号没有可用于文本生成的模型', models: [] });
+                return;
+            }
+            sendJson(res, 200, { models });
+        } catch (err) {
+            console.error('OpenAI models request failed:', err);
+            sendJson(res, 502, { error: '模型列表获取失败，请检查网络、代理或 API Key', models: [] });
+        }
+        return;
+    }
+
+    if (req.method !== 'POST') {
+        sendJson(res, 405, { error: '仅支持 POST 请求' });
         return;
     }
 
@@ -188,9 +270,30 @@ export async function handleAiMarkdownRequest(req: IncomingMessage, res: ServerR
         return;
     }
 
-    const model = requestedModel || readEnv('OPENAI_MODEL') || DEFAULT_MODEL;
+    let availableModels: ModelOption[] | null = null;
+    try {
+        availableModels = await getAvailableModels(apiKey);
+    } catch (err) {
+        console.error('OpenAI models request failed:', err);
+    }
+
+    const availableModelIds = new Set(availableModels?.map(item => item.id) ?? []);
+    if (availableModels && !availableModels.length) {
+        sendJson(res, 502, { error: '当前 OpenAI 账号没有返回可用于文本生成的模型' });
+        return;
+    }
+
+    if (requestedModel && availableModels && !availableModelIds.has(requestedModel)) {
+        sendJson(res, 400, { error: '当前 OpenAI 模型不可用，请刷新模型列表后重试' });
+        return;
+    }
+
+    const configuredModel = readEnv('OPENAI_MODEL');
+    const model = requestedModel
+        || (configuredModel && SELECTABLE_MODELS.has(configuredModel) && (!availableModels || availableModelIds.has(configuredModel)) ? configuredModel : '')
+        || availableModels?.[0]?.id
+        || DEFAULT_MODEL;
     const reasoningEffort = requestedReasoningEffort || DEFAULT_REASONING_EFFORT;
-    const serviceTier = requestedSpeed === 'fast' ? 'priority' : 'default';
 
     let upstream: Response;
     try {
@@ -201,14 +304,15 @@ export async function handleAiMarkdownRequest(req: IncomingMessage, res: ServerR
                 'Authorization': `Bearer ${apiKey}`,
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({
+            body: JSON.stringify(buildOpenAIRequestBody({
                 model,
-                reasoning: { effort: reasoningEffort },
-                service_tier: serviceTier,
-                stream: true,
-                instructions: buildInstructions(mode, task),
-                input: buildInput({ task, sourceText, extraInstruction }),
-            }),
+                reasoningEffort,
+                speed: requestedSpeed || 'standard',
+                mode,
+                task,
+                sourceText,
+                extraInstruction,
+            })),
         });
     } catch (err) {
         console.error('OpenAI request failed:', err);

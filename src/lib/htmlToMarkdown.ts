@@ -1,5 +1,5 @@
 import TurndownService from 'turndown';
-// @ts-ignore
+// @ts-expect-error turndown-plugin-gfm does not expose complete ESM typings here.
 import { gfm } from 'turndown-plugin-gfm';
 
 const turndownService = new TurndownService({
@@ -66,7 +66,7 @@ function isMarkdown(text: string): boolean {
         /\*[^*\n]+\*/,
         /\[[^\]]+\]\([^)]+\)/,
         /!\[[^\]]*\]\([^)]+\)/,
-        /^[\*\-\+]\s+/m,
+        /^[-*+]\s+/m,
         /^\d+\.\s+/m,
         /^>\s+/m,
         /`[^`]+`/,

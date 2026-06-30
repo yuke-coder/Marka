@@ -318,20 +318,3 @@ function getPositionInOriginalText(lines: string[], lineIndex: number): number {
   return position;
 }
 
-/**
- * Select text in a textarea element and scroll into view
- */
-export function selectTextAreaRange(
-  textarea: HTMLTextAreaElement,
-  start: number,
-  end: number
-): void {
-  // Save current scroll position before changing selection
-  const savedScrollTop = textarea.scrollTop;
-
-  textarea.focus();
-  textarea.setSelectionRange(start, end);
-
-  // Restore scroll position immediately to prevent browser's auto-scroll
-  textarea.scrollTop = savedScrollTop;
-}

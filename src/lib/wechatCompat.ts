@@ -27,7 +27,7 @@ async function getBase64Image(imgUrl: string): Promise<string> {
             reader.onerror = () => resolve(imgUrl);
             reader.readAsDataURL(blob);
         });
-    } catch (e) {
+    } catch {
         return imgUrl;
     }
 }

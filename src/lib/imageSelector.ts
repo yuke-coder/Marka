@@ -41,7 +41,7 @@ function findDataUrlImage(text: string, imageSrc: string, imageAlt: string): Ima
   if (imageAlt) {
     const escapedSig = escapeRegex(signature.substring(signature.indexOf(',') + 1));
     const altPattern = new RegExp(
-      `!\\[${escapeRegex(imageAlt)}\\]\\(data:image\\/[^;]+;base64,${escapedSig}[^\)]*\\)`,
+      `!\\[${escapeRegex(imageAlt)}\\]\\(data:image\\/[^;]+;base64,${escapedSig}[^)]*\\)`,
       'g'
     );
 
@@ -220,24 +220,6 @@ export function selectTextAreaRange(
 
   // Use the improved scroll logic
   scrollToPosition(textarea, start);
-}
-
-/**
- * Move cursor to a position and scroll into view
- * Better for navigation than selecting a range
- */
-export function moveCursorToPosition(
-  textarea: HTMLTextAreaElement,
-  position: number
-): void {
-  // Save current scroll position before moving cursor
-  const savedScrollTop = textarea.scrollTop;
-
-  textarea.focus();
-  textarea.setSelectionRange(position, position);
-
-  // Restore scroll position immediately to prevent browser's auto-scroll
-  textarea.scrollTop = savedScrollTop;
 }
 
 /**
