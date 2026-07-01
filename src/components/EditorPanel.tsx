@@ -52,8 +52,13 @@ export default function EditorPanel({ markdownInput, onInputChange, editorScroll
             />
             {isThinking && (
                 <div className="pointer-events-none absolute left-6 top-6 sm:left-8 sm:top-8 md:left-10 md:top-10">
-                    <div className="ai-thinking-shimmer font-mono text-[15px] font-semibold leading-[1.8] md:text-[16px]" data-text="正在思考">
-                        正在思考
+                    <div className="ai-thinking-status text-[16px] font-normal leading-[1.8] md:text-[17px]" aria-label="正在思考...">
+                        <span className="ai-thinking-text" aria-hidden="true">正在思考</span>
+                        <span className="ai-thinking-dots" aria-hidden="true">
+                            <span />
+                            <span />
+                            <span />
+                        </span>
                     </div>
                 </div>
             )}
@@ -104,7 +109,6 @@ export default function EditorPanel({ markdownInput, onInputChange, editorScroll
                         <button
                             onClick={onClearRequest}
                             className="inline-flex h-6 items-center justify-center rounded-md border border-[#00000012] px-2 text-[11px] font-medium text-[#d70015] transition-all hover:bg-[#d70015]/8 active:scale-95 dark:border-[#ffffff16] dark:text-[#ff6961] dark:hover:bg-[#ff6961]/10"
-                            data-tooltip="清除"
                         >
                             清除
                         </button>
@@ -112,7 +116,6 @@ export default function EditorPanel({ markdownInput, onInputChange, editorScroll
                         <button
                             onClick={onSelectAll}
                             className="inline-flex items-center justify-center h-6 px-2 rounded-md text-[11px] font-medium border border-[#00000012] dark:border-[#ffffff16] text-[#5e5e63] dark:text-[#98989d] hover:bg-black/[0.04] dark:hover:bg-white/[0.06] active:scale-95 transition-all select-none"
-                            data-tooltip="全选"
                         >
                             全选
                         </button>

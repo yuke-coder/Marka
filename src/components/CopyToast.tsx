@@ -24,26 +24,17 @@ const TONE_CONFIG: Record<NoticeTone, { icon: typeof CheckCircle2; iconColor: st
     error: { icon: AlertCircle, iconColor: 'text-[#ff3b30]', barColor: 'bg-[#ff3b30]' },
 };
 
-/**
- * 通用提示弹窗（复制成功 / 导出完成）。
- * 从屏幕右侧向左侧平滑弹出；底部进度条匀速递减，归零自动关闭；
- * 鼠标悬停时进度条暂停，离开后继续。
- */
 export default function CopyToast({ notice, onClose, duration = 3000 }: CopyToastProps) {
     const [progress, setProgress] = useState(100);
-    const [isPaused, setIsPaused] = useState(false);
     const isPausedRef = useRef(false);
     const elapsedRef = useRef(0);
     const onCloseRef = useRef(onClose);
 
-    useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
     useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
 
     useEffect(() => {
-        // notice 变化或关闭时统一重置进度条和计时。
         elapsedRef.current = 0;
         setProgress(100);
-        setIsPaused(false);
         isPausedRef.current = false;
 
         if (!notice) return;
@@ -76,9 +67,9 @@ export default function CopyToast({ notice, onClose, duration = 3000 }: CopyToas
                     animate={{ opacity: 1, x: 0 }}
                     exit={{ opacity: 0, x: 320 }}
                     transition={{ duration: 0.4, ease: [0.32, 0.72, 0, 1] }}
-                    onHoverStart={() => setIsPaused(true)}
-                    onHoverEnd={() => setIsPaused(false)}
-                    className="fixed right-4 sm:right-6 top-24 z-[300] w-[300px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-[#0000000a] bg-white/90 dark:bg-[#2c2c2e]/90 shadow-[0_8px_32px_rgba(0,0,0,0.12)] backdrop-blur-xl"
+                    onHoverStart={() => { isPausedRef.current = true; }}
+                    onHoverEnd={() => { isPausedRef.current = false; }}
+                    className="fixed right-4 sm:right-6 top-24 z-[300] w-fit max-w-[calc(100vw-2rem)] rounded-2xl border border-[#0000000a] bg-white/90 dark:bg-[#2c2c2e]/90 shadow-[0_8px_32px_rgba(0,0,0,0.12)] backdrop-blur-xl"
                 >
                     <div className="flex items-start gap-3 px-4 pt-4 pb-3">
                         <motion.div
@@ -89,10 +80,9 @@ export default function CopyToast({ notice, onClose, duration = 3000 }: CopyToas
                         >
                             <toneCfg.icon size={20} className={toneCfg.iconColor} />
                         </motion.div>
-                        <div className="min-w-0 flex-1">
-                            <p className="text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7]">{notice.title}</p>
-                            <div className="mt-0.5 flex min-w-0 items-center gap-2">
-                                <p className="min-w-0 truncate text-xs text-[#86868b] dark:text-[#a1a1a6]">{notice.description}</p>
+                        <div>
+                            <div className="flex items-center gap-2">
+                                <p className="whitespace-nowrap text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7]">{notice.title}</p>
                                 {notice.actionLabel && notice.onAction && (
                                     <button
                                         onClick={() => {
@@ -105,6 +95,7 @@ export default function CopyToast({ notice, onClose, duration = 3000 }: CopyToas
                                     </button>
                                 )}
                             </div>
+                            <p className="mt-0.5 max-w-[34rem] break-words text-xs leading-4 text-[#86868b] dark:text-[#a1a1a6]">{notice.description}</p>
                         </div>
                         <button
                             onClick={onClose}
@@ -114,8 +105,8 @@ export default function CopyToast({ notice, onClose, duration = 3000 }: CopyToas
                             <X size={14} />
                         </button>
                     </div>
-                    <div className="h-1 w-full bg-[#00000008] dark:bg-[#ffffff10]">
-                        <div className={`h-full ${toneCfg.barColor} transition-none`} style={{ width: `${progress}%` }} />
+                    <div className="h-1 w-full overflow-hidden rounded-b-2xl bg-[#00000008] dark:bg-[#ffffff10]">
+                        <div className={`h-full ${toneCfg.barColor}`} style={{ width: `${progress}%` }} />
                     </div>
                 </motion.div>
             )}

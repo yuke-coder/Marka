@@ -1,13 +1,12 @@
 import { useState, useEffect } from 'react';
-import { Moon, Sun, Maximize2, Minimize2 } from 'lucide-react';
+import { Moon, Sun, Maximize2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 interface HeaderProps {
     themeMode: 'light' | 'dark';
     onToggleTheme: () => void;
     onOpenAi: () => void;
-    isImmersive: boolean;
-    onToggleImmersive: () => void;
+    onEnterImmersive: () => void;
 }
 
 function formatDateTime(date: Date) {
@@ -26,7 +25,7 @@ function formatDateTime(date: Date) {
     };
 }
 
-export default function Header({ themeMode, onToggleTheme, onOpenAi, isImmersive, onToggleImmersive }: HeaderProps) {
+export default function Header({ themeMode, onToggleTheme, onOpenAi, onEnterImmersive }: HeaderProps) {
     const [now, setNow] = useState(new Date());
 
     useEffect(() => {
@@ -59,19 +58,17 @@ export default function Header({ themeMode, onToggleTheme, onOpenAi, isImmersive
                     data-testid="ai-markdown-open"
                     onClick={onOpenAi}
                     className="inline-flex items-center gap-1 h-7 px-2 sm:px-2.5 rounded-md border border-[#00000012] dark:border-[#ffffff16] text-[11px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7] bg-white/45 dark:bg-white/[0.06] hover:bg-white/70 dark:hover:bg-white/[0.1] transition-colors active:scale-[0.97]"
-                    data-tooltip="AI 优化 Markdown"
                 >
                     <span className="hidden sm:inline">AI 优化</span>
                     <span className="sm:hidden">AI</span>
                 </button>
                 <button
                     data-testid="immersive-toggle"
-                    onClick={onToggleImmersive}
+                    onClick={onEnterImmersive}
                     className="inline-flex items-center gap-1 h-7 px-2 sm:px-2.5 rounded-md border border-[#00000012] dark:border-[#ffffff16] text-[11px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7] bg-white/45 dark:bg-white/[0.06] hover:bg-white/70 dark:hover:bg-white/[0.1] transition-colors active:scale-[0.97]"
-                    title={isImmersive ? '退出沉浸编辑' : '沉浸编辑'}
                 >
-                    {isImmersive ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
-                    <span className="hidden sm:inline">{isImmersive ? '退出沉浸' : '沉浸编辑'}</span>
+                    <Maximize2 size={13} />
+                    <span className="hidden sm:inline">沉浸编辑</span>
                 </button>
                 <motion.button
                     whileHover={{ scale: 1.05 }}

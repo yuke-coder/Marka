@@ -145,7 +145,6 @@ export function DesktopToolbar({
                 data-testid="scroll-sync-toggle"
                 onClick={onToggleScrollSync}
                 className={`${tb} ${scrollSyncEnabled ? active : idle}`}
-                data-tooltip={scrollSyncEnabled ? '关闭滚动同步' : '开启滚动同步'}
             >
                 {scrollSyncEnabled ? <Link2 size={13} /> : <Unlink2 size={13} />}
                 <span className="hidden md:inline">同步滚动</span>
@@ -157,7 +156,6 @@ export function DesktopToolbar({
                 data-testid="copy-markdown-button"
                 onClick={onCopyMarkdown}
                 className={`${tb} ${idle}`}
-                data-tooltip="复制 Markdown 源码到剪贴板"
             >
                 <FileText size={13} />
                 <span className="hidden sm:inline">复制 MD</span>
@@ -193,7 +191,6 @@ export function MobileToolbar({
                 data-testid="export-pdf"
                 onClick={onExportPdf}
                 className={`${iconCls} ${idle}`}
-                data-tooltip="导出 PDF"
             >
                 <FileType2 size={iconSize} />
             </button>
@@ -201,7 +198,6 @@ export function MobileToolbar({
                 data-testid="export-html"
                 onClick={onExportHtml}
                 className={`${iconCls} ${idle}`}
-                data-tooltip="导出 HTML"
             >
                 <FileCode2 size={iconSize} />
             </button>
@@ -209,7 +205,6 @@ export function MobileToolbar({
                 data-testid="export-md"
                 onClick={onExportMarkdown}
                 className={`${iconCls} ${idle}`}
-                data-tooltip="导出 Markdown"
             >
                 <FileText size={iconSize} />
             </button>
@@ -217,7 +212,6 @@ export function MobileToolbar({
                 data-testid="copy-markdown-button"
                 onClick={onCopyMarkdown}
                 className={`flex items-center justify-center flex-auto ${compact ? 'h-7 gap-0.5 px-1 text-[10px]' : 'h-8 gap-1 px-2 text-[11px]'} min-w-0 rounded-lg font-medium transition-all duration-150 border select-none whitespace-nowrap touch-manipulation active:scale-95 ${idle}`}
-                data-tooltip="复制 Markdown 源码"
             >
                 <FileText size={compact ? 12 : 13} className="shrink-0" />
                 {!compact && <span>复制 MD</span>}

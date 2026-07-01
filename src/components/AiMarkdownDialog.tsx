@@ -857,7 +857,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                     <button
                         onClick={stopGenerating}
                         aria-label="打断输出"
-                        title="打断输出"
+                        data-tooltip="打断输出"
                         className={`inline-flex items-center justify-center rounded-md bg-[#1d1d1f] text-white transition-colors hover:bg-[#2f3137] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 dark:bg-[#f5f5f7] ${compact ? 'h-[clamp(22px,calc(var(--sh)*0.055),44px)] w-[clamp(22px,calc(var(--sh)*0.055),44px)]' : 'h-8 w-8'}`}
                     >
                         <span className="h-2.5 w-2.5 rounded-[2px] bg-white dark:bg-black" />
@@ -907,7 +907,6 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                         <button
                             type="button"
                             aria-label="复制纯文本内容"
-                            title="复制"
                             disabled={copiedFields.source || !hasSourceText}
                             onClick={() => void copyField('source', sourceTextareaRef.current?.value ?? sourceTextRef.current)}
                             className={iconButton}
@@ -954,7 +953,6 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                         <button
                             type="button"
                             aria-label="复制额外要求"
-                            title="复制"
                             disabled={copiedFields.extra || !extraInstruction}
                             onClick={() => void copyField('extra', extraInstruction)}
                             className={iconButton}
@@ -1003,7 +1001,6 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                         <button
                             type="button"
                             aria-label="复制纯文本内容"
-                            title="复制"
                             disabled={copiedFields.source || !hasSourceText}
                             onClick={() => void copyField('source', sourceTextareaRef.current?.value ?? sourceTextRef.current)}
                             className={iconButton}
@@ -1050,7 +1047,6 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                         <button
                             type="button"
                             aria-label="复制额外要求"
-                            title="复制"
                             disabled={copiedFields.extra || !extraInstruction}
                             onClick={() => void copyField('extra', extraInstruction)}
                             className={iconButton}
@@ -1112,8 +1108,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                             <button
                                 type="button"
                                 aria-label="复制继续更改和优化"
-                                title="复制"
-                                disabled={copiedFields.followup || !followup}
+                                    disabled={copiedFields.followup || !followup}
                                 onClick={() => void copyField('followup', followup)}
                                 className={iconButton}
                             >
@@ -1194,7 +1189,6 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                 <button
                     type="button"
                     aria-label="关闭提示"
-                    title="关闭提示"
                     onClick={(event) => { event.stopPropagation(); setModeTip(null); }}
                     className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-[#86868b] transition-colors hover:bg-black/[0.06] hover:text-[#1d1d1f] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 dark:text-[#a1a1a6] dark:hover:bg-white/[0.08] dark:hover:text-[#f5f5f7]"
                 >
@@ -1225,7 +1219,6 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                 <button
                     type="button"
                     aria-label="关闭提示"
-                    title="关闭提示"
                     onClick={(event) => { event.stopPropagation(); setModeTip(null); }}
                     className="absolute right-2 top-1/2 -translate-y-1/2 shrink-0 rounded-md p-1 text-[#86868b] transition-colors hover:bg-black/[0.06] hover:text-[#1d1d1f] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 dark:text-[#a1a1a6] dark:hover:bg-white/[0.08] dark:hover:text-[#f5f5f7]"
                 >

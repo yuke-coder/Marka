@@ -18,6 +18,7 @@ import Divider from './components/Divider';
 import { DEVICE_FRAME_PADDING, DEVICE_FRAME_SIZE } from './components/DeviceFrame';
 
 import CopyToast, { type Notice } from './components/CopyToast';
+import Tooltip from './components/Tooltip';
 import AiMarkdownDialog from './components/AiMarkdownDialog';
 import { cleanAiMarkdown, streamAiMarkdown, type AiApplyMode, type AiMarkdownRequest } from './lib/aiMarkdown';
 
@@ -153,7 +154,7 @@ function fallbackCopyHtml(html: string): void {
 }
 
 type AiEditorStream = { phase: 'idle' | 'connecting' | 'thinking' | 'streaming'; chars: number };
-const AI_CONNECTING_MS = 1000;
+const AI_CONNECTING_MS = 500;
 
 function AiEditorStreamNotice({ state }: { state: AiEditorStream }) {
     if (state.phase === 'idle' || state.phase === 'thinking') return null;
@@ -604,10 +605,21 @@ export default function App() {
     const confirmClearEditorContent = useCallback(() => {
         setMarkdownInput('');
         setHasAiGeneratedContent(false);
+        setAiStreamInterrupted(false);
+        setLastAiRequest(null);
         setConfirmClearEditor(false);
         editorScrollRef.current?.focus();
         showNotice('已清除', '编辑区内容已清空', 'success');
     }, [showNotice]);
+
+    const handleThemeChange = useCallback((themeId: string) => {
+        if (themeId === activeTheme) return;
+        if (aiStreamInterrupted) {
+            showNotice('暂不能切换模板', 'AI 生成已中断，请先继续生成或重新生成完整内容', 'error');
+            return;
+        }
+        setActiveTheme(themeId);
+    }, [activeTheme, aiStreamInterrupted, showNotice]);
 
     useEffect(() => {
         // Core rendering: markdown → HTML → styled HTML
@@ -700,8 +712,11 @@ export default function App() {
     }, []);
 
     const abortAiStream = useCallback(() => {
-        aiStreamAbortRef.current?.abort();
-    }, []);
+        const controller = aiStreamAbortRef.current;
+        if (!controller || controller.signal.aborted) return;
+        controller.abort();
+        showNotice('已终止生成', 'AI 生成已停止', 'success');
+    }, [showNotice]);
 
     const regenerateAiStream = useCallback(() => {
         if (lastAiRequest) void streamReplaceAiMarkdown(lastAiRequest);
@@ -861,9 +876,9 @@ export default function App() {
                     themeMode={themeMode}
                     onToggleTheme={toggleTheme}
                     onOpenAi={() => setAiMarkdownOpen(true)}
-                    isImmersive={isImmersive}
-                    onToggleImmersive={() => {
-                        setIsImmersive((prev) => !prev);
+                    onEnterImmersive={() => {
+                        if (isDesktop) showNotice('沉浸编辑已开启', '按 ESC 键退出沉浸编辑', 'success');
+                        setIsImmersive(true);
                         setActivePanel('editor');
                     }}
                 />
@@ -900,7 +915,7 @@ export default function App() {
 
             {/* 桌面端工具栏 */}
             {!isImmersive && <div className="glass-toolbar hidden md:flex items-center justify-between gap-2 px-2 lg:px-4 z-[90]">
-                <ThemeSelector activeTheme={activeTheme} onThemeChange={setActiveTheme} />
+                <ThemeSelector activeTheme={activeTheme} onThemeChange={handleThemeChange} />
                 <DesktopToolbar
                     previewDevice={previewDevice}
                     onDeviceChange={setPreviewDevice}
@@ -918,7 +933,7 @@ export default function App() {
             {/* 移动端工具栏（仅预览Tab显示）：整行自适应，溢出时切换紧凑模式 */}
             {!isImmersive && activePanel === 'preview' && (
                 <div ref={mobileToolbarRef} className="md:hidden glass-toolbar flex items-center px-2 py-1 z-[90] gap-1.5 overflow-hidden">
-                    <ThemeSelector activeTheme={activeTheme} onThemeChange={setActiveTheme} mobile compact={toolbarCompact} />
+                    <ThemeSelector activeTheme={activeTheme} onThemeChange={handleThemeChange} mobile compact={toolbarCompact} />
                     <MobileToolbar
                         onExportPdf={handleExportPdf}
                         onExportHtml={handleExportHtml}
@@ -1027,21 +1042,15 @@ export default function App() {
                 )}
             </main>
 
-            {/* 沉浸模式：悬浮退出按钮 */}
-            {isImmersive && (
-                <motion.button
-                    initial={{ opacity: 0, y: -8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -8 }}
-                    transition={{ duration: 0.2 }}
+            {isImmersive && !isDesktop && (
+                <button
                     data-testid="immersive-exit"
                     onClick={() => setIsImmersive(false)}
                     className="fixed top-3 right-3 z-[200] inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-white/85 dark:bg-[#1c1c1e]/85 backdrop-blur-md text-[12px] font-medium text-[#1d1d1f] dark:text-white shadow-[0_4px_20px_rgba(0,0,0,0.12)] border border-black/[0.08] dark:border-white/[0.1] transition-colors hover:bg-white dark:hover:bg-[#2c2c2e] active:scale-95"
-                    data-tooltip="退出沉浸编辑（ESC）"
                 >
                     <Minimize2 size={13} />
                     <span className="hidden sm:inline">退出沉浸</span>
-                </motion.button>
+                </button>
             )}
 
             <AiMarkdownDialog
@@ -1096,6 +1105,7 @@ export default function App() {
             </AnimatePresence>
 
             <CopyToast notice={notice} onClose={() => setNotice(null)} />
+            <Tooltip />
 
         </div>
     );
