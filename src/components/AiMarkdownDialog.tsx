@@ -26,6 +26,7 @@ import { ZHOUZUOLUO_PROMPT } from '../lib/prompts/zhouZuoluo';
 import { readClipboardText } from '../lib/clipboard';
 import { removeMarkdownFormatting } from '../lib/markdownUtils';
 import { mapRenderedPointToSource } from '../lib/promptCaret';
+import { ModelIcon } from '../lib/modelIcons';
 
 interface AiMarkdownDialogProps {
     isOpen: boolean;
@@ -74,38 +75,6 @@ const promptSurfaceClass = 'rounded-md bg-white px-3 py-2.5 text-[13px] leading-
 const promptFieldClass = `w-full resize-none placeholder-[#9a9aa0] focus-visible:shadow-[inset_0_0_0_1px_#0a84ff] disabled:opacity-70 ${promptSurfaceClass}`;
 const promptOverlayClass = `absolute inset-0 overflow-auto ${promptSurfaceClass} [&_*]:text-[inherit] [&_*]:leading-[inherit] [&_h1]:my-0 [&_h1]:text-[15px] [&_h1]:font-bold [&_h2]:my-0 [&_h2]:text-[14px] [&_h2]:font-semibold [&_h3]:my-0 [&_h3]:font-semibold [&_p]:my-0 [&_ul]:my-0 [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:my-0 [&_ol]:list-decimal [&_ol]:pl-4 [&_li]:my-0 [&_blockquote]:my-0 [&_blockquote]:border-l-2 [&_blockquote]:border-[#d0d7de] [&_blockquote]:pl-2 [&_pre]:my-0 [&_pre]:overflow-auto [&_pre]:rounded [&_pre]:bg-[#f5f5f7] [&_pre]:p-2 dark:[&_pre]:bg-[#262628] [&_code]:font-inherit`;
 
-const OFFICIAL_MODEL_ICON_PATHS = {
-    openai: 'M249.176 323.434V298.276C249.176 296.158 249.971 294.569 251.825 293.509L302.406 264.381C309.29 260.409 317.5 258.555 325.973 258.555C357.75 258.555 377.877 283.185 377.877 309.399C377.877 311.253 377.877 313.371 377.611 315.49L325.178 284.771C322.001 282.919 318.822 282.919 315.645 284.771L249.176 323.434ZM367.283 421.415V361.301C367.283 357.592 365.694 354.945 362.516 353.092L296.048 314.43L317.763 301.982C319.617 300.925 321.206 300.925 323.058 301.982L373.639 331.112C388.205 339.586 398.003 357.592 398.003 375.069C398.003 395.195 386.087 413.733 367.283 421.412V421.415ZM233.553 368.452L211.838 355.742C209.986 354.684 209.19 353.095 209.19 350.975V292.718C209.19 264.383 230.905 242.932 260.301 242.932C271.423 242.932 281.748 246.641 290.49 253.26L238.321 283.449C235.146 285.303 233.555 287.951 233.555 291.659V368.455L233.553 368.452ZM280.292 395.462L249.176 377.985V340.913L280.292 323.436L311.407 340.913V377.985L280.292 395.462ZM300.286 475.968C289.163 475.968 278.837 472.259 270.097 465.64L322.264 435.449C325.441 433.597 327.03 430.949 327.03 427.239V350.445L349.011 363.155C350.865 364.213 351.66 365.802 351.66 367.922V426.179C351.66 454.514 329.679 475.965 300.286 475.965V475.968ZM237.525 416.915L186.944 387.785C172.378 379.31 162.582 361.305 162.582 343.827C162.582 323.436 174.763 305.164 193.563 297.485V357.861C193.563 361.571 195.154 364.217 198.33 366.071L264.535 404.467L242.82 416.915C240.967 417.972 239.377 417.972 237.525 416.915ZM234.614 460.343C204.689 460.343 182.71 437.833 182.71 410.028C182.71 407.91 182.976 405.792 183.238 403.672L235.405 433.863C238.582 435.715 241.763 435.715 244.938 433.863L311.407 395.466V420.622C311.407 422.742 310.612 424.331 308.758 425.389L258.179 454.519C251.293 458.491 243.083 460.343 234.611 460.343H234.614ZM300.286 491.854C332.329 491.854 359.073 469.082 365.167 438.892C394.825 431.211 413.892 403.406 413.892 375.073C413.892 356.535 405.948 338.529 391.648 325.552C392.972 319.991 393.766 314.43 393.766 308.87C393.766 271.003 363.048 242.666 327.562 242.666C320.413 242.666 313.528 243.723 306.644 246.109C294.725 234.457 278.307 227.042 260.301 227.042C228.258 227.042 201.513 249.815 195.42 280.004C165.761 287.685 146.694 315.49 146.694 343.824C146.694 362.362 154.638 380.368 168.938 393.344C167.613 398.906 166.819 404.467 166.819 410.027C166.819 447.894 197.538 476.231 233.024 476.231C240.172 476.231 247.058 475.173 253.943 472.788C265.859 484.441 282.278 491.854 300.286 491.854Z',
-    deepseek: 'M26.5174 3.39471C26.235 3.2567 26.1137 3.52006 25.9487 3.65346C25.8923 3.69659 25.8446 3.75294 25.7969 3.80469C25.3846 4.24516 24.9027 4.53439 24.2737 4.49989C23.3536 4.44814 22.5682 4.73737 21.8735 5.44119C21.7258 4.57349 21.2353 4.0554 20.4889 3.72304C20.0985 3.55054 19.7034 3.37746 19.4297 3.00197C19.2388 2.73459 19.1865 2.43673 19.091 2.14289C19.0301 1.96579 18.9697 1.78466 18.7656 1.75418C18.5442 1.71968 18.4574 1.90541 18.3705 2.06067C18.0232 2.69549 17.8887 3.39471 17.9019 4.10313C17.9324 5.6965 18.6051 6.96556 19.9421 7.86834C20.0939 7.97184 20.133 8.07535 20.0852 8.22658C19.9938 8.53766 19.8857 8.83955 19.7903 9.15063C19.7293 9.34901 19.6384 9.39271 19.4257 9.30588C18.692 8.9994 18.0583 8.54571 17.4982 7.99772C16.5477 7.07827 15.6881 6.06336 14.6162 5.26869C14.3644 5.08296 14.1125 4.91045 13.8521 4.746C12.7584 3.68394 13.9952 2.81164 14.2816 2.70814C14.5812 2.60003 14.3857 2.22857 13.4179 2.23317C12.4502 2.2372 11.5646 2.56151 10.4359 2.99335C10.2708 3.05832 10.0972 3.10547 9.91951 3.14457C8.8954 2.95022 7.83162 2.90709 6.72069 3.03245C4.62877 3.26533 2.95777 4.25436 1.72954 5.94261C0.254043 7.97184 -0.0932678 10.2777 0.33167 12.6824C0.778458 15.2171 2.07225 17.3153 4.06008 18.9558C6.12152 20.6567 8.49577 21.4905 11.2047 21.3306C12.8498 21.2358 14.6812 21.0155 16.7473 19.2669C17.2682 19.5262 17.8151 19.6297 18.7219 19.7074C19.4205 19.7723 20.0933 19.6729 20.6143 19.5648C21.4302 19.3923 21.3739 18.6367 21.0789 18.4981C18.6874 17.3843 19.2124 17.8374 18.7351 17.4706C19.9501 16.033 21.8063 13.4776 22.379 9.99821C22.4353 9.61409 22.5072 9.073 22.4986 8.76192C22.494 8.57216 22.5377 8.49856 22.7545 8.47671C23.3536 8.40771 23.935 8.24383 24.4692 7.94999C26.0188 7.10357 26.6439 5.71318 26.7911 4.04678C26.8129 3.79204 26.7865 3.52869 26.5174 3.39471ZM13.0143 18.3946C10.6964 16.5724 9.5722 15.9726 9.10816 15.9985C8.67402 16.0244 8.75222 16.5212 8.84768 16.8449C8.94773 17.1646 9.07768 17.3849 9.25996 17.6655C9.38589 17.8512 9.47272 18.1272 9.13404 18.3348C8.38766 18.7965 7.08985 18.1796 7.0289 18.1491C5.51833 17.2595 4.25559 16.0853 3.36546 14.4793C2.50581 12.9337 2.0067 11.2753 1.92447 9.50542C1.90262 9.07818 2.02855 8.92695 2.45406 8.84932C3.01413 8.74582 3.59144 8.72397 4.15093 8.80619C6.51656 9.15178 8.53027 10.2092 10.2185 11.8848C11.1822 12.8388 11.9114 13.979 12.6623 15.0929C13.461 16.2757 14.3201 17.4027 15.4144 18.3268C15.8008 18.6505 16.109 18.8966 16.404 19.0783C15.5144 19.1778 14.0297 19.1991 13.0143 18.3958V18.3946ZM14.1252 11.2489C14.1252 11.0591 14.277 10.9079 14.4679 10.9079C14.511 10.9079 14.5501 10.9165 14.5852 10.9292C14.6329 10.9464 14.6766 10.9723 14.7111 11.0114C14.7721 11.0718 14.8066 11.158 14.8066 11.2489C14.8066 11.4386 14.6548 11.5899 14.4639 11.5899C14.273 11.5899 14.1252 11.4386 14.1252 11.2489ZM17.5759 13.0188C17.3545 13.1096 17.1331 13.1873 16.9203 13.1959C16.5903 13.2131 16.2303 13.0791 16.0348 12.9153C15.7312 12.6605 15.5139 12.5179 15.423 12.0734C15.3839 11.8837 15.4057 11.5899 15.4402 11.4214C15.5185 11.0585 15.4316 10.8257 15.1757 10.614C14.9676 10.4415 14.7025 10.3938 14.4115 10.3938C14.3029 10.3938 14.2034 10.3461 14.1292 10.3076C14.0079 10.2472 13.9078 10.096 14.0033 9.91023C14.0338 9.84985 14.1815 9.70322 14.216 9.67734C14.6111 9.45251 15.0665 9.52612 15.488 9.6946C15.8784 9.85445 16.174 10.1477 16.5989 10.5623C17.033 11.0631 17.1112 11.2011 17.3585 11.5772C17.554 11.871 17.7317 12.1729 17.8536 12.5185C17.9272 12.7341 17.8317 12.9107 17.5759 13.0188Z',
-} as const;
-
-const DOUBAO_ICON_PATHS: Array<{ d: string; opacity?: string }> = [
-    { d: 'M5.31 15.756c.172-3.75 1.883-5.999 2.549-6.739-3.26 2.058-5.425 5.658-6.358 8.308v1.12C1.501 21.513 4.226 24 7.59 24a6.59 6.59 0 002.2-.375c.353-.12.7-.248 1.039-.378.913-.899 1.65-1.91 2.243-2.992-4.877 2.431-7.974.072-7.763-4.5l.002.001z', opacity: '.5' },
-    { d: 'M22.57 10.283c-1.212-.901-4.109-2.404-7.397-2.8.295 3.792.093 8.766-2.1 12.773a12.782 12.782 0 01-2.244 2.992c3.764-1.448 6.746-3.457 8.596-5.219 2.82-2.683 3.353-5.178 3.361-6.66a2.737 2.737 0 00-.216-1.084v-.002zM14.303 1.867C12.955.7 11.248 0 9.39 0 7.532 0 5.883.677 4.545 1.807 2.791 3.29 1.627 5.557 1.5 8.125v9.201c.932-2.65 3.097-6.25 6.357-8.307.5-.318 1.025-.595 1.569-.829 1.883-.801 3.878-.932 5.746-.706-.222-2.83-.718-5.002-.87-5.617h.001z' },
-    { d: 'M17.305 4.961a199.47 199.47 0 01-1.08-1.094c-.202-.213-.398-.419-.586-.622l-1.333-1.378c.151.615.648 2.786.869 5.617 3.288.395 6.185 1.898 7.396 2.8-1.306-1.275-3.475-3.487-5.266-5.323z', opacity: '.5' },
-];
-
-function ModelIcon({ modelId }: { modelId: AiMarkdownModel }) {
-    const id = modelId.toLowerCase();
-    const isOpenAI = /^(gpt-|o\d|chatgpt)/.test(id);
-    const isDeepSeek = id.startsWith('deepseek-');
-    const isDoubao = id.startsWith('doubao-') || id.startsWith('ark-');
-
-    if (!isOpenAI && !isDeepSeek && !isDoubao) {
-        return <span className="h-4 w-4 shrink-0" aria-hidden="true" />;
-    }
-
-    return (
-        <span className="flex h-4 w-4 shrink-0 items-center justify-center text-[#5f6672] dark:text-[#d8d8dc]" aria-hidden="true">
-            <svg viewBox={isDoubao ? '0 0 24 24' : isDeepSeek ? '0 0 27 22' : '146 227 268 265'} className="h-3.5 w-3.5" fill="currentColor">
-                {isDoubao
-                    ? DOUBAO_ICON_PATHS.map((path, index) => <path key={index} d={path.d} fillOpacity={path.opacity} />)
-                    : <path d={isDeepSeek ? OFFICIAL_MODEL_ICON_PATHS.deepseek : OFFICIAL_MODEL_ICON_PATHS.openai} />}
-            </svg>
-        </span>
-    );
-}
-
 export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
     const { isOpen, isDesktop, currentMarkdown, onClose, onApply, onStreamReplace, showNotice } = props;
     const [mode, setMode] = useState<AiMarkdownMode>('format');
@@ -135,6 +104,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
     const [modeDrag, setModeDrag] = useState(0);
     const [isModeDragging, setIsModeDragging] = useState(false);
     const [isPromptRendered, setIsPromptRendered] = useState(false);
+    const [keyboardHeight, setKeyboardHeight] = useState(0);
 
     const abortRef = useRef<AbortController | null>(null);
     const streamedRef = useRef('');
@@ -156,6 +126,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
     const canGenerate = hasSourceText && !isGenerating;
     const showOutput = phase !== 'idle' || Boolean(result);
     const prefersReducedMotion = useReducedMotion();
+    const keyboardActive = keyboardHeight > 0;
 
     useEffect(() => {
         showNoticeRef.current = showNotice;
@@ -174,6 +145,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
             if (modeTipTimerRef.current) window.clearTimeout(modeTipTimerRef.current);
             setIsModeTipPaused(false);
             setIsPromptRendered(false);
+            setKeyboardHeight(0);
         }
     }, [isOpen]);
 
@@ -217,6 +189,24 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
         document.addEventListener('keydown', onKeyDown);
         return () => document.removeEventListener('keydown', onKeyDown);
     }, [isOpen, isDesktop, isGenerating, onClose]);
+
+    // 移动端虚拟键盘高度追踪：键盘弹出时收起面板底部并上移，避免遮挡输入框
+    useEffect(() => {
+        if (isDesktop || !isOpen) return;
+        const vv = window.visualViewport;
+        if (!vv) return;
+        const update = () => {
+            const kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+            setKeyboardHeight(kb);
+        };
+        update();
+        vv.addEventListener('resize', update);
+        vv.addEventListener('scroll', update);
+        return () => {
+            vv.removeEventListener('resize', update);
+            vv.removeEventListener('scroll', update);
+        };
+    }, [isDesktop, isOpen]);
 
     const stopGenerating = useCallback(() => {
         const partial = streamedRef.current || result;
@@ -924,35 +914,45 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                         </button>
                         <span ref={sourceLengthRef} className="text-[11px] text-[#86868b] dark:text-[#8e8e93]">{sourceTextRef.current.length} 字</span>
                     </span>
-                    <span className="flex items-center gap-1.5">
-                        <button type="button" onClick={() => void pasteSourceText()} disabled={isGenerating} className={desktopFieldButton}>
+                    {hasSourceText && (
+                        <span className="flex items-center gap-1.5">
+                            <button type="button" onClick={() => void pasteSourceText()} disabled={isGenerating} className={desktopFieldButton}>
+                                <Clipboard size={11} />
+                                粘贴
+                            </button>
+                            <button type="button" onClick={clearSourceFormatting} disabled={isGenerating} className={desktopFieldButton}>
+                                <RemoveFormatting size={11} />
+                                清除格式
+                            </button>
+                            <button type="button" onClick={clearSourceText} disabled={isGenerating} className={desktopFieldButton}>
+                                <Eraser size={11} />
+                                清除
+                            </button>
+                        </span>
+                    )}
+                </div>
+                <div className="relative flex min-h-0 flex-1">
+                    <textarea
+                        ref={sourceTextareaRef}
+                        data-testid="ai-source-text"
+                        aria-label="纯文本内容"
+                        defaultValue={sourceTextRef.current}
+                        onInput={(e) => syncSourceText(e.currentTarget.value)}
+                        className={`${fieldClass} h-full min-h-[360px] flex-1`}
+                        disabled={isGenerating}
+                    />
+                    {!hasSourceText && (
+                        <button
+                            type="button"
+                            onClick={() => void pasteSourceText()}
+                            disabled={isGenerating}
+                            className={`absolute left-3 top-2.5 z-10 ${desktopFieldButton}`}
+                        >
                             <Clipboard size={11} />
                             粘贴
                         </button>
-                        {hasSourceText && (
-                            <>
-                                <button type="button" onClick={clearSourceFormatting} disabled={isGenerating} className={desktopFieldButton}>
-                                    <RemoveFormatting size={11} />
-                                    清除格式
-                                </button>
-                                <button type="button" onClick={clearSourceText} disabled={isGenerating} className={desktopFieldButton}>
-                                    <Eraser size={11} />
-                                    清除
-                                </button>
-                            </>
-                        )}
-                    </span>
+                    )}
                 </div>
-                <textarea
-                    ref={sourceTextareaRef}
-                    data-testid="ai-source-text"
-                    aria-label="纯文本内容"
-                    defaultValue={sourceTextRef.current}
-                    onInput={(e) => syncSourceText(e.currentTarget.value)}
-                    className={`${fieldClass} h-full min-h-[360px] flex-1`}
-                    placeholder="粘贴需要转换的纯文本..."
-                    disabled={isGenerating}
-                />
             </div>
 
             <div className="flex min-h-0 flex-[1.1] flex-col">
@@ -1011,35 +1011,45 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                         </button>
                         <span ref={sourceLengthRef} className="text-[11px] text-[#86868b] dark:text-[#8e8e93]">{sourceTextRef.current.length} 字</span>
                     </span>
-                    <span className="flex items-center gap-1">
-                        <button type="button" onClick={() => void pasteSourceText()} disabled={isGenerating} className={compactFieldButton}>
+                    {hasSourceText && (
+                        <span className="flex items-center gap-1">
+                            <button type="button" onClick={() => void pasteSourceText()} disabled={isGenerating} className={compactFieldButton}>
+                                <Clipboard size={11} />
+                                粘贴
+                            </button>
+                            <button type="button" onClick={clearSourceFormatting} disabled={isGenerating} className={compactFieldButton}>
+                                <RemoveFormatting size={11} />
+                                清除格式
+                            </button>
+                            <button type="button" onClick={clearSourceText} disabled={isGenerating} className={compactFieldButton}>
+                                <Eraser size={11} />
+                                清除
+                            </button>
+                        </span>
+                    )}
+                </div>
+                <div className="relative flex min-h-0 flex-1">
+                    <textarea
+                        ref={sourceTextareaRef}
+                        data-testid="ai-source-text"
+                        aria-label="纯文本内容"
+                        defaultValue={sourceTextRef.current}
+                        onInput={(e) => syncSourceText(e.currentTarget.value)}
+                        className={`${fieldClass} h-full min-h-[120px] flex-1`}
+                        disabled={isGenerating}
+                    />
+                    {!hasSourceText && (
+                        <button
+                            type="button"
+                            onClick={() => void pasteSourceText()}
+                            disabled={isGenerating}
+                            className={`absolute left-3 top-2.5 z-10 ${compactFieldButton}`}
+                        >
                             <Clipboard size={11} />
                             粘贴
                         </button>
-                        {hasSourceText && (
-                            <>
-                                <button type="button" onClick={clearSourceFormatting} disabled={isGenerating} className={compactFieldButton}>
-                                    <RemoveFormatting size={11} />
-                                    清除格式
-                                </button>
-                                <button type="button" onClick={clearSourceText} disabled={isGenerating} className={compactFieldButton}>
-                                    <Eraser size={11} />
-                                    清除
-                                </button>
-                            </>
-                        )}
-                    </span>
+                    )}
                 </div>
-                <textarea
-                    ref={sourceTextareaRef}
-                    data-testid="ai-source-text"
-                    aria-label="纯文本内容"
-                    defaultValue={sourceTextRef.current}
-                    onInput={(e) => syncSourceText(e.currentTarget.value)}
-                    className={`${fieldClass} h-full min-h-[120px] flex-1`}
-                    placeholder="粘贴需要转换的纯文本..."
-                    disabled={isGenerating}
-                />
             </div>
 
             <div className="flex min-h-0 flex-1 flex-col">
@@ -1278,16 +1288,16 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                             animate={{
                                 opacity: 1,
                                 y: 0,
-                                top: isFullscreen ? 0 : 'auto',
-                                bottom: 0,
+                                top: isFullscreen || keyboardActive ? 0 : 'auto',
+                                bottom: keyboardHeight,
                                 left: 0,
                                 right: 0,
-                                height: isFullscreen ? '100vh' : `${sheetHeight}vh`,
-                                borderTopLeftRadius: isFullscreen ? 0 : 14,
-                                borderTopRightRadius: isFullscreen ? 0 : 14,
+                                height: keyboardActive ? `calc(100vh - ${keyboardHeight}px)` : (isFullscreen ? '100vh' : `${sheetHeight}vh`),
+                                borderTopLeftRadius: (isFullscreen || keyboardActive) ? 0 : 14,
+                                borderTopRightRadius: (isFullscreen || keyboardActive) ? 0 : 14,
                             }}
                             exit={{ opacity: 0, y: '100%' }}
-                            transition={isDragging
+                            transition={isDragging || keyboardActive
                                 ? { duration: 0 }
                                 : isFullscreen
                                     ? {
@@ -1302,7 +1312,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                             className={`fixed z-[201] grid overflow-hidden bg-[#fbfcfe] shadow-[0_-22px_64px_rgba(15,23,42,0.2)] dark:bg-[#1c1c1e] will-change-transform`}
                             style={{
                                 gridTemplateRows: 'auto minmax(0, 1fr) auto',
-                                '--sh': isFullscreen ? '100vh' : `${sheetHeight}vh`,
+                                '--sh': keyboardActive ? `calc(100vh - ${keyboardHeight}px)` : (isFullscreen ? '100vh' : `${sheetHeight}vh`),
                             } as React.CSSProperties}
                         >
                             <header className={`px-4 pb-2 ${isFullscreen ? 'pt-[max(env(safe-area-inset-top),16px)]' : 'pt-2'}`}>
@@ -1325,7 +1335,17 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                                 </div>
                                 {renderModeSwitch(true)}
                             </header>
-                            <main className="flex min-h-0 flex-col gap-3 overflow-y-auto overscroll-contain px-4 py-3">
+                            <main
+                                className="flex min-h-0 flex-col gap-3 overflow-y-auto overscroll-contain px-4 py-3"
+                                onFocus={(e) => {
+                                    const target = e.target;
+                                    if (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) {
+                                        window.setTimeout(() => {
+                                            target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                                        }, 400);
+                                    }
+                                }}
+                            >
                                 {mobileInputPane}
                                 {showOutput && renderOutputPane()}
                             </main>
