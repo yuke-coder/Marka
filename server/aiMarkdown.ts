@@ -14,28 +14,33 @@ interface AiMarkdownBody {
     extraInstruction?: string;
 }
 
-const OPENAI_API_URL = 'https://api.openai.com/v1/responses';
-const OPENAI_MODELS_URL = 'https://api.openai.com/v1/models';
-const DEFAULT_MODEL = 'gpt-5.4-nano';
+const PROVIDERS = {
+    openai: { apiKeyEnvs: ['OPENAI_API_KEY'], apiUrl: 'https://api.openai.com/v1/responses', modelsUrl: 'https://api.openai.com/v1/models', label: 'OpenAI' },
+    deepseek: { apiKeyEnvs: ['DEEPSEEK_API_KEY'], apiUrl: 'https://api.deepseek.com/chat/completions', modelsUrl: 'https://api.deepseek.com/models', label: 'DeepSeek' },
+    doubao: { apiKeyEnvs: ['ARK_API_KEY', 'DOUBAO_API_KEY', 'VOLCENGINE_API_KEY'], apiUrl: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions', label: 'Doubao' },
+} as const;
+type AiProvider = keyof typeof PROVIDERS;
+
+const DOUBAO_SEED_MODEL = 'doubao-seed-2-1-pro-260628';
+const DEFAULT_MODEL = DOUBAO_SEED_MODEL;
 const DEFAULT_REASONING_EFFORT = 'low';
 const MODEL_OPTIONS = [
-    { id: 'gpt-5.5', label: 'GPT-5.5', shortLabel: '5.5' },
-    { id: 'gpt-5.4', label: 'GPT-5.4', shortLabel: '5.4' },
-    { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini', shortLabel: '5.4 Mini' },
-    { id: 'gpt-5.4-nano', label: 'GPT-5.4 Nano', shortLabel: '5.4 Nano' },
+    { id: DOUBAO_SEED_MODEL, label: 'Doubao-Seed-2.1-pro', provider: 'doubao' },
+    { id: 'gpt-5.5', label: 'GPT-5.5', provider: 'openai' },
+    { id: 'gpt-5.4', label: 'GPT-5.4', provider: 'openai' },
+    { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini', provider: 'openai' },
+    { id: 'gpt-5.4-nano', label: 'GPT-5.4 Nano', provider: 'openai' },
+    { id: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash', provider: 'deepseek' },
+    { id: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', provider: 'deepseek' },
 ] as const;
 const SELECTABLE_REASONING_EFFORTS: Set<string> = new Set(['low', 'medium', 'high', 'xhigh']);
 const SELECTABLE_SPEEDS: Set<string> = new Set(['standard', 'fast']);
 const MODELS_CACHE_MS = 5 * 60 * 1000;
-const SELECTABLE_MODELS: Set<string> = new Set(MODEL_OPTIONS.map(option => option.id));
+const MODEL_ENV_KEYS = ['AI_MARKDOWN_MODEL', 'DOUBAO_MODEL', 'ARK_MODEL', 'OPENAI_MODEL', 'DEEPSEEK_MODEL'];
+type ModelOption = { id: string; label: string };
+
 let proxyReady = false;
 let availableModelsCache: { expiresAt: number; models: ModelOption[] } | null = null;
-
-interface ModelOption {
-    id: string;
-    label: string;
-    shortLabel: string;
-}
 
 function readEnv(name: string) {
     const value = process.env[name]?.trim() || '';
@@ -54,13 +59,32 @@ function sendJson(res: ServerResponse, status: number, data: unknown) {
     res.end(JSON.stringify(data));
 }
 
-async function readAvailableModelIds(apiKey: string) {
+function getApiKey(provider: AiProvider) {
+    return PROVIDERS[provider].apiKeyEnvs.map(readEnv).find(Boolean) || '';
+}
+
+function getApiKeyEnvLabel(provider: AiProvider) {
+    return PROVIDERS[provider].apiKeyEnvs.join(' 或 ');
+}
+
+function getModelOption(id: string) {
+    return MODEL_OPTIONS.find(option => option.id === id);
+}
+
+async function readAvailableModelIds(provider: AiProvider) {
     setupProxy();
-    const response = await fetch(OPENAI_MODELS_URL, {
+    const config = PROVIDERS[provider];
+    const apiKey = getApiKey(provider);
+    if (!apiKey) return new Set<string>();
+    if (!('modelsUrl' in config)) {
+        return new Set(MODEL_OPTIONS.filter(option => option.provider === provider).map(option => option.id));
+    }
+
+    const response = await fetch(config.modelsUrl, {
         headers: { Authorization: `Bearer ${apiKey}` },
     });
 
-    if (!response.ok) throw new Error(`OpenAI models request failed: ${response.status}`);
+    if (!response.ok) throw new Error(`${config.label} models request failed: ${response.status}`);
 
     const data = await response.json();
     return new Set<string>(
@@ -70,14 +94,23 @@ async function readAvailableModelIds(apiKey: string) {
     );
 }
 
-async function getAvailableModels(apiKey: string) {
+async function getAvailableModels() {
     const now = Date.now();
     if (availableModelsCache && availableModelsCache.expiresAt > now) return availableModelsCache.models;
 
-    const availableIds = await readAvailableModelIds(apiKey);
+    const idsByProvider = new Map<AiProvider, Set<string>>();
+    await Promise.all((Object.keys(PROVIDERS) as AiProvider[]).map(async provider => {
+        try {
+            idsByProvider.set(provider, await readAvailableModelIds(provider));
+        } catch (err) {
+            console.error(`${PROVIDERS[provider].label} models request failed:`, err);
+            idsByProvider.set(provider, new Set());
+        }
+    }));
+
     const models = MODEL_OPTIONS
-        .filter(option => availableIds.has(option.id))
-        .map(option => ({ ...option }));
+        .filter(option => idsByProvider.get(option.provider)?.has(option.id))
+        .map(({ id, label }) => ({ id, label }));
 
     availableModelsCache = { expiresAt: now + MODELS_CACHE_MS, models };
     return models;
@@ -89,7 +122,6 @@ function normalizeReasoningEffort(effort: string) {
 }
 
 function supportsReasoningControls(model: string) {
-    if (/chat/i.test(model)) return false;
     return /^gpt-5(?:[.-]|$)/i.test(model) || /^o[1-9](?:[.-]|$)/i.test(model);
 }
 
@@ -114,7 +146,33 @@ function buildOpenAIRequestBody(args: {
     return body;
 }
 
-async function readOpenAIError(upstream: Response) {
+function buildChatRequestBody(args: {
+    provider: AiProvider;
+    model: string;
+    reasoningEffort: string;
+    mode: AiMarkdownMode;
+    task: AiMarkdownTask;
+    sourceText: string;
+    extraInstruction: string;
+}) {
+    const body: Record<string, unknown> = {
+        model: args.model,
+        stream: true,
+        messages: [
+            { role: 'system', content: buildInstructions(args.mode, args.task) },
+            { role: 'user', content: buildInput(args) },
+        ],
+    };
+
+    if (args.provider === 'deepseek') {
+        body.thinking = { type: args.reasoningEffort === 'low' ? 'disabled' : 'enabled' };
+        if (args.reasoningEffort !== 'low') body.reasoning_effort = args.reasoningEffort === 'xhigh' ? 'max' : 'high';
+    }
+
+    return body;
+}
+
+async function readProviderError(provider: AiProvider, upstream: Response) {
     const text = await upstream.text().catch(() => '');
     let code = '';
     let type = '';
@@ -127,21 +185,26 @@ async function readOpenAIError(upstream: Response) {
         // Keep provider error details out of the client response.
     }
 
-    console.error('OpenAI response failed:', { status: upstream.status, code, type });
+    const label = PROVIDERS[provider].label;
+    console.error(`${label} response failed:`, { status: upstream.status, code, type });
 
     if (upstream.status === 401 || code === 'invalid_api_key') {
-        return 'OpenAI API Key 无效或未被当前账号接受，请重新复制或生成新的 Key 后重试';
+        return `${label} API Key 无效或未被当前账号接受，请重新复制或生成新的 Key 后重试`;
     }
 
     if (upstream.status === 429 || code === 'rate_limit_exceeded') {
-        return 'OpenAI 请求过于频繁或额度不足，请稍后重试';
+        return `${label} 请求过于频繁或额度不足，请稍后重试`;
+    }
+
+    if (upstream.status === 402 || code === 'insufficient_quota') {
+        return `${label} 余额不足或计费未开通，请检查账户余额后重试`;
     }
 
     if (code === 'model_not_found') {
-        return '当前 OpenAI 模型不可用，请检查模型选择或 OPENAI_MODEL 环境变量';
+        return `当前 ${label} 模型不可用，请检查模型选择或 API 配置`;
     }
 
-    return `OpenAI 请求失败（${upstream.status || 502}）`;
+    return `${label} 请求失败（${upstream.status || 502}）`;
 }
 
 function readJson(req: IncomingMessage): Promise<AiMarkdownBody> {
@@ -208,22 +271,16 @@ function buildInput(body: { task: AiMarkdownTask; sourceText: string; extraInstr
 }
 
 export async function handleAiMarkdownRequest(req: IncomingMessage, res: ServerResponse) {
-    const apiKey = readEnv('OPENAI_API_KEY');
-    if (!apiKey) {
-        sendJson(res, 500, { error: '缺少 OPENAI_API_KEY 环境变量' });
-        return;
-    }
-
     if (req.method === 'GET') {
         try {
-            const models = await getAvailableModels(apiKey);
+            const models = await getAvailableModels();
             if (!models.length) {
-                sendJson(res, 502, { error: '当前 OpenAI 账号没有可用于文本生成的模型', models: [] });
+                sendJson(res, 502, { error: '当前没有可用于文本生成的模型，请检查 ARK_API_KEY、DOUBAO_API_KEY、VOLCENGINE_API_KEY、OPENAI_API_KEY 或 DEEPSEEK_API_KEY', models: [] });
                 return;
             }
             sendJson(res, 200, { models });
         } catch (err) {
-            console.error('OpenAI models request failed:', err);
+            console.error('AI models request failed:', err);
             sendJson(res, 502, { error: '模型列表获取失败，请检查网络、代理或 API Key', models: [] });
         }
         return;
@@ -250,8 +307,8 @@ export async function handleAiMarkdownRequest(req: IncomingMessage, res: ServerR
     const sourceText = (body.sourceText || '').trim();
     const extraInstruction = body.extraInstruction || '';
 
-    if (requestedModel && !SELECTABLE_MODELS.has(requestedModel)) {
-        sendJson(res, 400, { error: '请选择有效的 OpenAI 模型' });
+    if (requestedModel && !getModelOption(requestedModel)) {
+        sendJson(res, 400, { error: '请选择有效的模型' });
         return;
     }
 
@@ -272,56 +329,65 @@ export async function handleAiMarkdownRequest(req: IncomingMessage, res: ServerR
 
     let availableModels: ModelOption[] | null = null;
     try {
-        availableModels = await getAvailableModels(apiKey);
+        availableModels = await getAvailableModels();
     } catch (err) {
-        console.error('OpenAI models request failed:', err);
+        console.error('AI models request failed:', err);
     }
 
     const availableModelIds = new Set(availableModels?.map(item => item.id) ?? []);
     if (availableModels && !availableModels.length) {
-        sendJson(res, 502, { error: '当前 OpenAI 账号没有返回可用于文本生成的模型' });
+        sendJson(res, 502, { error: '当前没有返回可用于文本生成的模型，请检查 API Key' });
         return;
     }
 
     if (requestedModel && availableModels && !availableModelIds.has(requestedModel)) {
-        sendJson(res, 400, { error: '当前 OpenAI 模型不可用，请刷新模型列表后重试' });
+        sendJson(res, 400, { error: '当前模型不可用，请刷新模型列表后重试' });
         return;
     }
 
-    const configuredModel = readEnv('OPENAI_MODEL');
+    const configuredModel = MODEL_ENV_KEYS
+        .map(readEnv)
+        .find(id => getModelOption(id) && (!availableModels || availableModelIds.has(id)));
     const model = requestedModel
-        || (configuredModel && SELECTABLE_MODELS.has(configuredModel) && (!availableModels || availableModelIds.has(configuredModel)) ? configuredModel : '')
+        || configuredModel
         || availableModels?.[0]?.id
         || DEFAULT_MODEL;
+    const modelOption = getModelOption(model);
+    if (!modelOption) {
+        sendJson(res, 400, { error: '请选择有效的模型' });
+        return;
+    }
+
+    const provider = modelOption.provider;
+    const apiKey = getApiKey(provider);
+    if (!apiKey) {
+        sendJson(res, 500, { error: `缺少 ${getApiKeyEnvLabel(provider)} 环境变量` });
+        return;
+    }
+
     const reasoningEffort = requestedReasoningEffort || DEFAULT_REASONING_EFFORT;
 
     let upstream: Response;
     try {
         setupProxy();
-        upstream = await fetch(OPENAI_API_URL, {
+        upstream = await fetch(PROVIDERS[provider].apiUrl, {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${apiKey}`,
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify(buildOpenAIRequestBody({
-                model,
-                reasoningEffort,
-                speed: requestedSpeed || 'standard',
-                mode,
-                task,
-                sourceText,
-                extraInstruction,
-            })),
+            body: JSON.stringify(provider === 'openai'
+                ? buildOpenAIRequestBody({ model, reasoningEffort, speed: requestedSpeed || 'standard', mode, task, sourceText, extraInstruction })
+                : buildChatRequestBody({ provider, model, reasoningEffort, mode, task, sourceText, extraInstruction })),
         });
     } catch (err) {
-        console.error('OpenAI request failed:', err);
-        sendJson(res, 502, { error: 'OpenAI 请求失败，请检查网络或 API 配置' });
+        console.error(`${PROVIDERS[provider].label} request failed:`, err);
+        sendJson(res, 502, { error: `${PROVIDERS[provider].label} 请求失败，请检查网络或 API 配置` });
         return;
     }
 
     if (!upstream.ok || !upstream.body) {
-        sendJson(res, upstream.status || 502, { error: await readOpenAIError(upstream) });
+        sendJson(res, upstream.status || 502, { error: await readProviderError(provider, upstream) });
         return;
     }
 

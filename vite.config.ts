@@ -29,9 +29,17 @@ function aiMarkdownApi(): Plugin {
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, process.cwd(), '')
+    process.env.AI_MARKDOWN_MODEL ||= env.AI_MARKDOWN_MODEL?.trim()
     process.env.OPENAI_API_KEY ||= env.OPENAI_API_KEY?.trim()
     process.env.OPENAI_MODEL ||= env.OPENAI_MODEL?.trim()
     process.env.OPENAI_PROXY ||= env.OPENAI_PROXY?.trim()
+    process.env.DEEPSEEK_API_KEY ||= env.DEEPSEEK_API_KEY?.trim()
+    process.env.DEEPSEEK_MODEL ||= env.DEEPSEEK_MODEL?.trim()
+    process.env.ARK_API_KEY ||= env.ARK_API_KEY?.trim()
+    process.env.DOUBAO_API_KEY ||= env.DOUBAO_API_KEY?.trim()
+    process.env.VOLCENGINE_API_KEY ||= env.VOLCENGINE_API_KEY?.trim()
+    process.env.DOUBAO_MODEL ||= env.DOUBAO_MODEL?.trim()
+    process.env.ARK_MODEL ||= env.ARK_MODEL?.trim()
 
     const pagesBasePath = process.env.VITE_PAGES_BASE_PATH
     const base = pagesBasePath != null && pagesBasePath !== '' ? `${pagesBasePath}/` : '/'

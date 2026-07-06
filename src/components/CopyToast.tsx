@@ -69,7 +69,7 @@ export default function CopyToast({ notice, onClose, duration = 3000 }: CopyToas
                     transition={{ duration: 0.4, ease: [0.32, 0.72, 0, 1] }}
                     onHoverStart={() => { isPausedRef.current = true; }}
                     onHoverEnd={() => { isPausedRef.current = false; }}
-                    className="fixed right-4 sm:right-6 top-24 z-[300] w-fit max-w-[calc(100vw-2rem)] rounded-2xl border border-[#0000000a] bg-white/90 dark:bg-[#2c2c2e]/90 shadow-[0_8px_32px_rgba(0,0,0,0.12)] backdrop-blur-xl"
+                    className="fixed right-4 top-24 z-[300] w-[320px] max-w-[calc(100vw-2rem)] rounded-2xl border border-[#0000000a] bg-white/90 shadow-[0_8px_32px_rgba(0,0,0,0.12)] backdrop-blur-xl dark:bg-[#2c2c2e]/90 sm:right-6 sm:w-fit"
                 >
                     <div className="flex items-start gap-3 px-4 pt-4 pb-3">
                         <motion.div
@@ -80,9 +80,9 @@ export default function CopyToast({ notice, onClose, duration = 3000 }: CopyToas
                         >
                             <toneCfg.icon size={20} className={toneCfg.iconColor} />
                         </motion.div>
-                        <div>
-                            <div className="flex items-center gap-2">
-                                <p className="whitespace-nowrap text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7]">{notice.title}</p>
+                        <div className="min-w-0 flex-1 sm:flex-none">
+                            <div className="flex items-start gap-2 sm:items-center">
+                                <p className="min-w-0 flex-1 break-words text-sm font-medium text-[#1d1d1f] dark:text-[#f5f5f7] sm:flex-none sm:whitespace-nowrap">{notice.title}</p>
                                 {notice.actionLabel && notice.onAction && (
                                     <button
                                         onClick={() => {

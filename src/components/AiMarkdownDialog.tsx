@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type TouchEvent as ReactTouchEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { md } from '../lib/markdown';
 import { Check, ChevronDown, ChevronRight, Clipboard, Copy, Eraser, Loader2, RefreshCcw, RemoveFormatting, Sparkles, Wand2, X, Zap } from 'lucide-react';
 import {
     DEFAULT_AI_MARKDOWN_MODEL,
@@ -58,12 +59,336 @@ const MODE_TIP_DURATION = 3200;
 
 const fieldClass = 'w-full resize-none rounded-md bg-white px-3 py-2.5 text-[13px] leading-6 text-[#1d1d1f] shadow-[inset_0_0_0_1px_rgba(29,29,31,0.1)] outline-none transition placeholder-[#9a9aa0] focus:shadow-[inset_0_0_0_1px_#0a84ff,0_0_0_3px_rgba(10,132,255,0.14)] dark:bg-[#171719] dark:text-[#f5f5f7] dark:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.12)] disabled:opacity-70';
 const ghostButton = 'inline-flex h-8 items-center justify-center gap-1.5 rounded-md bg-[#eef0f4] px-3 text-[12px] font-medium text-[#4b5563] transition-colors hover:bg-[#e4e7ec] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#2c2c2e] dark:text-[#d1d1d6] dark:hover:bg-[#3a3a3c]';
+const desktopFieldButton = 'inline-flex h-7 items-center justify-center gap-1 rounded-md bg-[#eef0f4] px-2 text-[11px] font-medium text-[#4b5563] transition-colors hover:bg-[#e4e7ec] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#2c2c2e] dark:text-[#d1d1d6] dark:hover:bg-[#3a3a3c]';
 const compactGhostButton = 'inline-flex h-[clamp(22px,calc(var(--sh)*0.055),44px)] items-center justify-center gap-1 rounded-md bg-[#eef0f4] px-[clamp(8px,calc(var(--sh)*0.022),20px)] py-0 text-[clamp(10px,calc(var(--sh)*0.018),15px)] font-medium text-[#4b5563] transition-colors active:bg-[#e4e7ec] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#2c2c2e] dark:text-[#d1d1d6] dark:active:bg-[#3a3a3c]';
 const compactFieldButton = 'inline-flex h-7 items-center justify-center gap-1 rounded-md bg-[#eef0f4] px-2 text-[11px] font-medium text-[#4b5563] transition-colors active:bg-[#e4e7ec] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#2c2c2e] dark:text-[#d1d1d6] dark:active:bg-[#3a3a3c]';
 const primaryButton = 'inline-flex h-8 items-center justify-center gap-1.5 rounded-md bg-[#1d1d1f] px-3.5 text-[12px] font-semibold text-white transition-colors hover:bg-[#2f3137] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 disabled:cursor-not-allowed disabled:opacity-55 dark:bg-[#f5f5f7] dark:text-black';
 const compactPrimaryButton = 'inline-flex h-[clamp(22px,calc(var(--sh)*0.055),44px)] items-center justify-center gap-1 rounded-md bg-[#1d1d1f] px-[clamp(8px,calc(var(--sh)*0.026),22px)] py-0 text-[clamp(10px,calc(var(--sh)*0.018),15px)] font-semibold text-white transition-colors active:bg-[#2f3137] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 disabled:cursor-not-allowed disabled:opacity-55 dark:bg-[#f5f5f7] dark:text-black';
 const labelClass = 'text-[12px] font-semibold text-[#4f5866] dark:text-[#c7c7cc]';
 const iconButton = 'inline-flex h-5 w-5 items-center justify-center rounded-[4px] bg-transparent text-[#86868b] transition-colors hover:bg-black/[0.06] hover:text-[#4b5563] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/30 disabled:cursor-not-allowed disabled:opacity-30 dark:text-[#8e8e93] dark:hover:bg-white/[0.07] dark:hover:text-[#c7c7cc]';
+const promptSurfaceClass = 'rounded-md bg-white px-3 py-2.5 text-[13px] leading-6 text-[#1d1d1f] shadow-[inset_0_0_0_1px_rgba(29,29,31,0.1)] outline-none [scrollbar-gutter:stable] dark:bg-[#171719] dark:text-[#f5f5f7] dark:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.12)]';
+const promptFieldClass = `w-full resize-none placeholder-[#9a9aa0] focus-visible:shadow-[inset_0_0_0_1px_#0a84ff] disabled:opacity-70 ${promptSurfaceClass}`;
+const promptOverlayClass = `absolute inset-0 overflow-auto ${promptSurfaceClass} [&_*]:text-[inherit] [&_*]:leading-[inherit] [&_h1]:my-0 [&_h1]:text-[15px] [&_h1]:font-bold [&_h2]:my-0 [&_h2]:text-[14px] [&_h2]:font-semibold [&_h3]:my-0 [&_h3]:font-semibold [&_p]:my-0 [&_ul]:my-0 [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:my-0 [&_ol]:list-decimal [&_ol]:pl-4 [&_li]:my-0 [&_blockquote]:my-0 [&_blockquote]:border-l-2 [&_blockquote]:border-[#d0d7de] [&_blockquote]:pl-2 [&_pre]:my-0 [&_pre]:overflow-auto [&_pre]:rounded [&_pre]:bg-[#f5f5f7] [&_pre]:p-2 dark:[&_pre]:bg-[#262628] [&_code]:font-inherit`;
+
+const ZHOUZUOLUO_PROMPT = `# 角色设定
+
+你是粥左罗公众号的排版设计师。你需要用纯 Markdown 源码（内嵌 HTML/CSS style 属性）生成一篇完整还原粥左罗微信公众号文章视觉排版的文章。所有样式必须写在每个元素的 \`style=""\` 内联属性中，禁止使用 CSS 类名、外部样式表或 \`<style>\` 标签。
+
+---
+
+# 核心约束
+
+当前任务为存量原始文本纯格式化重排版，请勿擅自执行文本生成或内容改写操作，仅负责调整文本版式结构。
+
+---
+
+# 一、全局视觉参数（像素级精确）
+
+## 1.1 正文段落
+- 字号：18px
+- 颜色：#3f3f3f（非纯黑，手机端更柔和）
+- 行高：1.75
+- 字间距：1px
+- 对齐：两端对齐（text-align: justify）
+- 词内断行：word-break: break-all
+- 两端缩进：padding: 0 16px
+- 段间距：每个 \`<p>\` 标签 margin: 0 0 20px 0
+- 段首：不缩进（text-indent: 0），不空格
+
+## 1.2 加粗/强调文字
+- 颜色：#000000（纯黑，与正文 #3f3f3f 形成层次对比）
+- 标签：\`<strong style="color:#000000;">文字</strong>\`
+- 不使用 Markdown \`**加粗**\` 语法
+
+## 1.3 品牌色
+- 主色：\`#fa8c16\`（暖橙色，向上生长品牌基调）
+- 浅底色：\`#fdf6ec\`（品牌色 6% 透明度，金句底色块）
+- 浅边框：\`#e8e8e8\`（模块分隔线）
+
+## 1.4 注释/辅助文字
+- 字号：16px（大注释）、15px（小注释/图注）
+- 颜色：#888888
+
+## 1.5 大标题（文章主标题）
+- 字号：24px
+- 颜色：#000000
+- 加粗：font-weight: bold
+- 行高：1.5
+- 字间距：1px
+- 对齐：居中
+- 上下边距：margin: 24px 16px
+
+## 1.6 模块编号（01、02、03...）
+- 字号：20px
+- 颜色：#000000
+- 加粗：font-weight: bold
+- 对齐：居中
+- 上下边距：margin: 30px 0 8px 0
+- 独立一行，前后有间距
+
+## 1.7 小标题（模块主标题 + 副标题）
+- 主标题：字号 20px，颜色 #000000，加粗，居中，margin: 0 0 4px 0
+- 副标题：字号 20px，颜色 #000000，加粗，居中，margin: 0 0 20px 0
+- 部分小标题只有一行
+
+## 1.8 重点底色块（金句/核心观点）
+- 背景色：#fdf6ec
+- 左边框：4px solid #fa8c16
+- 圆角：0 4px 4px 0（左侧直角贴边，右侧圆角）
+- 内边距：20px 16px
+- 外边距：margin: 24px 16px
+- 内部文字：保持正文规范（18px / #3f3f3f / 1.75 / 两端对齐）
+
+## 1.9 全背景金句块（结尾升华金句）
+- 背景色：#fdf6ec
+- 圆角：8px（四角统一）
+- 内边距：28px 20px
+- 外边距：margin: 36px 16px
+- 对齐：居中
+- 文字：字号 18px，加粗，颜色 #000000，行高 1.8，字间距 1px
+
+## 1.10 图片 + 图注
+- 图片：max-width: 100%，border-radius: 4px，居中容器
+- 图注：字号 15px，颜色 #888888，紧贴图片（margin-top: 8px），居中
+- 图片与图注之间不留白（保持整体性）
+
+## 1.11 分割线
+- Markdown 三个短横 \`---\`
+
+---
+
+# 二、文章结构模板（按此顺序）
+
+## 2.1 期数标签
+
+\`\`\`html
+<div style="text-align: center; margin: 16px 0 20px 0;">
+  <span style="font-size: 16px; color: #888888;">
+    这是余客的第 <strong style="color:#000000;">N</strong> 期分享
+  </span>
+</div>
+\`\`\`
+
+## 2.2 分割线
+
+\`\`\`html
+---
+\`\`\`
+
+## 2.3 作者信息
+
+\`\`\`html
+<div style="text-align: center; margin: 20px 0 4px 0;">
+  <span style="font-size: 16px; color: #888888;">
+    作者 l XXX &nbsp;&nbsp; 编辑 l XXX
+  </span>
+</div>
+\`\`\`
+
+## 2.4 来源信息
+
+\`\`\`html
+<div style="text-align: center; margin: 4px 0;">
+  <span style="font-size: 16px; color: #888888;">
+    来源 l 粥左罗（ID：fangdushe520）
+  </span>
+</div>
+\`\`\`
+
+## 2.5 转载授权
+
+\`\`\`html
+<div style="text-align: center; margin: 4px 0 30px 0;">
+  <span style="font-size: 16px; color: #888888;">
+    转载请联系授权（微信ID：zzlloveutoo）
+  </span>
+</div>
+\`\`\`
+
+## 2.6 正文开头
+
+\`\`\`html
+<div style="font-size: 18px; color: #3f3f3f; line-height: 1.75; letter-spacing: 1px; text-align: justify; word-break: break-all; padding: 0 16px;">
+
+<p style="margin: 0 0 20px 0;">
+【原文段落】
+</p>
+
+</div>
+\`\`\`
+
+## 2.7 模块编号（01、02、03...）
+
+\`\`\`html
+<p style="text-align: center; font-size: 20px; font-weight: bold; color: #000000; margin: 30px 0 8px 0;">
+  【原文编号】
+</p>
+\`\`\`
+
+## 2.8 小标题
+
+\`\`\`html
+<!-- 两行小标题 -->
+<p style="text-align: center; font-size: 20px; font-weight: bold; color: #000000; margin: 0 0 4px 0;">
+  【原文小标题第一行】
+</p>
+<p style="text-align: center; font-size: 20px; font-weight: bold; color: #000000; margin: 0 0 20px 0;">
+  【原文小标题第二行】
+</p>
+
+<!-- 或单行 -->
+<p style="text-align: center; font-size: 20px; font-weight: bold; color: #000000; margin: 0 0 20px 0;">
+  【原文小标题】
+</p>
+\`\`\`
+
+## 2.9 正文容器
+
+\`\`\`html
+<div style="font-size: 18px; color: #3f3f3f; line-height: 1.75; letter-spacing: 1px; text-align: justify; word-break: break-all; padding: 0 16px;">
+
+<p style="margin: 0 0 20px 0;">
+【原文段落】
+</p>
+
+<p style="margin: 0 0 20px 0;">
+<strong style="color:#000000;">【原文加粗句】</strong>
+</p>
+
+</div>
+\`\`\`
+
+## 2.10 重点底色块（金句/核心观点）
+
+\`\`\`html
+<div style="margin: 24px 16px; padding: 20px 16px; background-color: #fdf6ec; border-left: 4px solid #fa8c16; border-radius: 0 4px 4px 0;">
+  <p style="font-size: 18px; color: #3f3f3f; line-height: 1.75; letter-spacing: 1px; text-align: justify; margin: 0 0 12px 0;">
+    <strong style="color:#000000;">【原文金句】</strong>
+  </p>
+  <p style="font-size: 18px; color: #3f3f3f; line-height: 1.75; letter-spacing: 1px; text-align: justify; margin: 0;">
+    <strong style="color:#000000;">【原文金句】</strong>
+  </p>
+</div>
+\`\`\`
+
+## 2.11 结尾金句块
+
+\`\`\`html
+<div style="margin: 36px 16px; padding: 28px 20px; background-color: #fdf6ec; border-radius: 8px; text-align: center;">
+  <p style="font-size: 18px; font-weight: bold; color: #000000; line-height: 1.8; letter-spacing: 1px; margin: 0 0 12px 0;">
+    【原文结尾金句】
+  </p>
+  <p style="font-size: 18px; font-weight: bold; color: #000000; line-height: 1.8; letter-spacing: 1px; margin: 0;">
+    【原文结尾金句】
+  </p>
+</div>
+\`\`\`
+
+## 2.12 文章结束标记
+
+\`\`\`html
+<p style="text-align: center; font-size: 18px; font-weight: bold; color: #000000; margin: 30px 0;">
+  END
+</p>
+\`\`\`
+
+## 2.13 CTA 转化区
+
+\`\`\`html
+<div style="margin: 30px 16px; padding: 20px 16px; background-color: #f8f8f8; border-radius: 8px; text-align: center;">
+  <p style="font-size: 18px; font-weight: bold; color: #000000; line-height: 1.8; margin: 0 0 8px 0;">
+    【原文 CTA 文案】
+  </p>
+  <div style="display: inline-block; font-size: 16px; font-weight: bold; color: #ffffff; background-color: #fa8c16; padding: 8px 24px; border-radius: 4px; letter-spacing: 1px; margin-bottom: 16px;">
+    【原文按钮文案】
+  </div>
+  <div style="text-align: center;">
+    <img src="https://example.com/qrcode.jpg" alt="二维码" style="width: 120px; height: 120px; border-radius: 4px;" />
+  </div>
+</div>
+\`\`\`
+
+## 2.14 作者名片
+
+\`\`\`html
+<div style="margin: 40px 16px 30px 16px; padding: 24px 16px; background-color: #f8f8f8; border-radius: 8px; text-align: center;">
+  <p style="font-size: 18px; font-weight: bold; color: #000000; line-height: 1.8; letter-spacing: 1px; margin: 0 0 16px 0;">
+    本文作者：粥左罗
+  </p>
+  <p style="font-size: 16px; color: #888888; line-height: 1.6; margin: 0 0 4px 0;">
+    90后，公众号「粥左罗」主理人
+  </p>
+  <p style="font-size: 16px; color: #888888; line-height: 1.6; margin: 0 0 4px 0;">
+    7本畅销书作者，110万粉丝
+  </p>
+  <p style="font-size: 16px; color: #888888; line-height: 1.6; margin: 0 0 16px 0;">
+    100篇10万+爆文，靠写作年入千万
+  </p>
+  <div style="display: inline-block; font-size: 16px; font-weight: bold; color: #ffffff; background-color: #fa8c16; padding: 8px 24px; border-radius: 4px; letter-spacing: 1px; margin-bottom: 16px;">
+    关注公众号「粥左罗」
+  </div>
+  <div style="text-align: center;">
+    <img src="https://example.com/qrcode.jpg" alt="公众号二维码" style="width: 120px; height: 120px; border-radius: 4px;" />
+    <p style="font-size: 15px; color: #888888; margin-top: 8px;">长按识别二维码，和我一起成长</p>
+  </div>
+</div>
+\`\`\`
+
+---
+
+# 三、文章完整结构
+
+\`\`\`
+[期数标签] → 固定模板
+  ↓
+[分割线] → ---
+  ↓
+[作者信息] → 原文作者
+  ↓
+[来源信息] → 固定模板
+  ↓
+[转载授权] → 固定模板
+  ↓
+[正文开头] → 原文段落
+  ↓
+[模块1~N] → 编号 + 小标题 + 原文正文 + 原文加粗句 + 原文金句入底色块
+  ↓
+[结尾金句块] → 原文结尾核心金句
+  ↓
+[END 标记] → 固定模板
+  ↓
+[CTA 转化区] → 原文推广文案
+  ↓
+[分割线] → ---
+  ↓
+[作者名片] → 固定模板
+\`\`\`
+
+---
+
+# 四、写作风格参考
+
+- **选题**：个人成长、认知升级、底层逻辑、思维模型
+- **语气**：坚定有力量感，短句为主，一句一段，口语化
+- **开头**：直接引入，不绕弯子
+- **正文**：每个模块 = 编号 + 小标题 + 正文，观点用故事/案例支撑，核心句加粗
+- **金句**：短小精练，朗朗上口，用重复、回环、类比、押韵
+- **结尾**：升华主题，给读者行动召唤
+- **字数**：2000-3000 字，4-5 个模块
+
+---
+
+# 五、输出要求
+
+1. 输出纯 Markdown 源码，可直接粘贴到支持 HTML 渲染的 Markdown 编辑器
+2. 所有样式用内联 \`style=""\` 属性，不使用 CSS 类名、id、\`<style>\` 标签
+3. 正文每个段落为独立 \`<p>\` 标签，margin: 0 0 20px 0
+4. 加粗用 \`<strong style="color:#000000;">\`，不用 \`**\`
+5. 品牌色统一 #fa8c16，浅底色 #fdf6ec，正文灰 #3f3f3f
+6. 模块编号从 01 开始
+7. 图片 URL 用占位符 \`https://example.com/xxx.jpg\`
+8. 参数精确到像素
+9. 输出结果中不包含解释性文字，只输出文章源码`;
 
 // 通过临时 offscreen 元素执行 execCommand('paste')，不污染目标输入框
 function readClipboardViaTempElement(tag: 'textarea' | 'div'): string | null {
@@ -111,6 +436,128 @@ function decodeHtmlEntities(text: string) {
     const textarea = document.createElement('textarea');
     textarea.innerHTML = text;
     return textarea.value;
+}
+
+function getTextOffsetFromPoint(root: HTMLElement, x: number, y: number) {
+    const doc = root.ownerDocument;
+    const pointDoc = doc as Document & {
+        caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+        caretRangeFromPoint?: (x: number, y: number) => Range | null;
+    };
+    const caret = pointDoc.caretPositionFromPoint?.(x, y);
+    const range = caret ? doc.createRange() : pointDoc.caretRangeFromPoint?.(x, y);
+    if (!range) return root.textContent?.length ?? 0;
+    if (caret) {
+        range.setStart(caret.offsetNode, caret.offset);
+        range.collapse(true);
+    }
+    if (!root.contains(range.startContainer)) return root.textContent?.length ?? 0;
+
+    const before = doc.createRange();
+    before.selectNodeContents(root);
+    before.setEnd(range.startContainer, range.startOffset);
+    return before.toString().length;
+}
+
+function buildVisibleIndex(text: string, sourceMode = false) {
+    let value = '';
+    const positions = [0];
+    let atLineStart = true;
+    let inFence = false;
+
+    const push = (char: string, offset: number) => {
+        const next = /\s/.test(char) ? ' ' : char.toLowerCase();
+        if (next === ' ' && value.endsWith(' ')) return;
+        value += next;
+        positions.push(offset);
+    };
+
+    for (let i = 0; i < text.length; i += 1) {
+        const char = text[i];
+        const rest = text.slice(i);
+
+        if (sourceMode && atLineStart && /^(```|~~~)/.test(rest)) {
+            inFence = !inFence;
+            const end = text.indexOf('\n', i);
+            if (end === -1) break;
+            i = end;
+            atLineStart = true;
+            continue;
+        }
+
+        if (sourceMode && !inFence) {
+            if (char === '<') {
+                const end = text.indexOf('>', i + 1);
+                if (end !== -1) {
+                    i = end;
+                    continue;
+                }
+            }
+            if (char === '\\' && text[i + 1]) continue;
+            if (atLineStart) {
+                const match = rest.match(/^(\s{0,3}(?:#{1,6}|>|[-*+]|\d+[.)])\s+)/);
+                if (match) {
+                    i += match[1].length - 1;
+                    atLineStart = false;
+                    continue;
+                }
+            }
+            if (char === ']' && text[i + 1] === '(') {
+                const end = text.indexOf(')', i + 2);
+                if (end !== -1) {
+                    i = end;
+                    continue;
+                }
+            }
+            if ('#*_~`[]'.includes(char)) {
+                atLineStart = false;
+                continue;
+            }
+        }
+
+        push(char, i + 1);
+        atLineStart = char === '\n';
+    }
+
+    return { value: value.trimEnd(), positions };
+}
+
+function getVisiblePosition(text: string, rawOffset: number) {
+    return buildVisibleIndex(text.slice(0, rawOffset)).value.length;
+}
+
+function mapRenderedPointToSource(root: HTMLElement, markdown: string, x: number, y: number) {
+    const renderedText = root.textContent ?? '';
+    const renderedOffset = getTextOffsetFromPoint(root, x, y);
+    const renderedIndex = buildVisibleIndex(renderedText);
+    const sourceIndex = buildVisibleIndex(markdown, true);
+    const renderedPosition = getVisiblePosition(renderedText, renderedOffset);
+    if (!renderedIndex.value || !sourceIndex.value) return markdown.length;
+
+    for (const radius of [28, 20, 14, 9, 5]) {
+        let start = Math.max(0, renderedPosition - radius);
+        let end = Math.min(renderedIndex.value.length, renderedPosition + radius);
+        while (start < renderedPosition && renderedIndex.value[start] === ' ') start += 1;
+        while (end > renderedPosition && renderedIndex.value[end - 1] === ' ') end -= 1;
+        const needle = renderedIndex.value.slice(start, end);
+        if (needle.length < 2) continue;
+
+        const matches: number[] = [];
+        for (let index = sourceIndex.value.indexOf(needle); index !== -1; index = sourceIndex.value.indexOf(needle, index + 1)) {
+            matches.push(index);
+        }
+        if (!matches.length) continue;
+
+        const caretInNeedle = Math.max(0, renderedPosition - start);
+        const expected = Math.round((renderedPosition / renderedIndex.value.length) * sourceIndex.value.length);
+        const match = matches.reduce((best, current) =>
+            Math.abs(current + caretInNeedle - expected) < Math.abs(best + caretInNeedle - expected) ? current : best
+        );
+        return sourceIndex.positions[Math.min(match + caretInNeedle, sourceIndex.positions.length - 1)] ?? markdown.length;
+    }
+
+    const fallback = Math.round((renderedPosition / renderedIndex.value.length) * sourceIndex.value.length);
+    return sourceIndex.positions[Math.min(fallback, sourceIndex.positions.length - 1)] ?? markdown.length;
 }
 
 function removeMarkdownFormatting(markdown: string) {
@@ -185,6 +632,32 @@ function removeMarkdownFormatting(markdown: string) {
         .trim();
 }
 
+const OFFICIAL_MODEL_ICON_PATHS = {
+    openai: 'M249.176 323.434V298.276C249.176 296.158 249.971 294.569 251.825 293.509L302.406 264.381C309.29 260.409 317.5 258.555 325.973 258.555C357.75 258.555 377.877 283.185 377.877 309.399C377.877 311.253 377.877 313.371 377.611 315.49L325.178 284.771C322.001 282.919 318.822 282.919 315.645 284.771L249.176 323.434ZM367.283 421.415V361.301C367.283 357.592 365.694 354.945 362.516 353.092L296.048 314.43L317.763 301.982C319.617 300.925 321.206 300.925 323.058 301.982L373.639 331.112C388.205 339.586 398.003 357.592 398.003 375.069C398.003 395.195 386.087 413.733 367.283 421.412V421.415ZM233.553 368.452L211.838 355.742C209.986 354.684 209.19 353.095 209.19 350.975V292.718C209.19 264.383 230.905 242.932 260.301 242.932C271.423 242.932 281.748 246.641 290.49 253.26L238.321 283.449C235.146 285.303 233.555 287.951 233.555 291.659V368.455L233.553 368.452ZM280.292 395.462L249.176 377.985V340.913L280.292 323.436L311.407 340.913V377.985L280.292 395.462ZM300.286 475.968C289.163 475.968 278.837 472.259 270.097 465.64L322.264 435.449C325.441 433.597 327.03 430.949 327.03 427.239V350.445L349.011 363.155C350.865 364.213 351.66 365.802 351.66 367.922V426.179C351.66 454.514 329.679 475.965 300.286 475.965V475.968ZM237.525 416.915L186.944 387.785C172.378 379.31 162.582 361.305 162.582 343.827C162.582 323.436 174.763 305.164 193.563 297.485V357.861C193.563 361.571 195.154 364.217 198.33 366.071L264.535 404.467L242.82 416.915C240.967 417.972 239.377 417.972 237.525 416.915ZM234.614 460.343C204.689 460.343 182.71 437.833 182.71 410.028C182.71 407.91 182.976 405.792 183.238 403.672L235.405 433.863C238.582 435.715 241.763 435.715 244.938 433.863L311.407 395.466V420.622C311.407 422.742 310.612 424.331 308.758 425.389L258.179 454.519C251.293 458.491 243.083 460.343 234.611 460.343H234.614ZM300.286 491.854C332.329 491.854 359.073 469.082 365.167 438.892C394.825 431.211 413.892 403.406 413.892 375.073C413.892 356.535 405.948 338.529 391.648 325.552C392.972 319.991 393.766 314.43 393.766 308.87C393.766 271.003 363.048 242.666 327.562 242.666C320.413 242.666 313.528 243.723 306.644 246.109C294.725 234.457 278.307 227.042 260.301 227.042C228.258 227.042 201.513 249.815 195.42 280.004C165.761 287.685 146.694 315.49 146.694 343.824C146.694 362.362 154.638 380.368 168.938 393.344C167.613 398.906 166.819 404.467 166.819 410.027C166.819 447.894 197.538 476.231 233.024 476.231C240.172 476.231 247.058 475.173 253.943 472.788C265.859 484.441 282.278 491.854 300.286 491.854Z',
+    deepseek: 'M26.5174 3.39471C26.235 3.2567 26.1137 3.52006 25.9487 3.65346C25.8923 3.69659 25.8446 3.75294 25.7969 3.80469C25.3846 4.24516 24.9027 4.53439 24.2737 4.49989C23.3536 4.44814 22.5682 4.73737 21.8735 5.44119C21.7258 4.57349 21.2353 4.0554 20.4889 3.72304C20.0985 3.55054 19.7034 3.37746 19.4297 3.00197C19.2388 2.73459 19.1865 2.43673 19.091 2.14289C19.0301 1.96579 18.9697 1.78466 18.7656 1.75418C18.5442 1.71968 18.4574 1.90541 18.3705 2.06067C18.0232 2.69549 17.8887 3.39471 17.9019 4.10313C17.9324 5.6965 18.6051 6.96556 19.9421 7.86834C20.0939 7.97184 20.133 8.07535 20.0852 8.22658C19.9938 8.53766 19.8857 8.83955 19.7903 9.15063C19.7293 9.34901 19.6384 9.39271 19.4257 9.30588C18.692 8.9994 18.0583 8.54571 17.4982 7.99772C16.5477 7.07827 15.6881 6.06336 14.6162 5.26869C14.3644 5.08296 14.1125 4.91045 13.8521 4.746C12.7584 3.68394 13.9952 2.81164 14.2816 2.70814C14.5812 2.60003 14.3857 2.22857 13.4179 2.23317C12.4502 2.2372 11.5646 2.56151 10.4359 2.99335C10.2708 3.05832 10.0972 3.10547 9.91951 3.14457C8.8954 2.95022 7.83162 2.90709 6.72069 3.03245C4.62877 3.26533 2.95777 4.25436 1.72954 5.94261C0.254043 7.97184 -0.0932678 10.2777 0.33167 12.6824C0.778458 15.2171 2.07225 17.3153 4.06008 18.9558C6.12152 20.6567 8.49577 21.4905 11.2047 21.3306C12.8498 21.2358 14.6812 21.0155 16.7473 19.2669C17.2682 19.5262 17.8151 19.6297 18.7219 19.7074C19.4205 19.7723 20.0933 19.6729 20.6143 19.5648C21.4302 19.3923 21.3739 18.6367 21.0789 18.4981C18.6874 17.3843 19.2124 17.8374 18.7351 17.4706C19.9501 16.033 21.8063 13.4776 22.379 9.99821C22.4353 9.61409 22.5072 9.073 22.4986 8.76192C22.494 8.57216 22.5377 8.49856 22.7545 8.47671C23.3536 8.40771 23.935 8.24383 24.4692 7.94999C26.0188 7.10357 26.6439 5.71318 26.7911 4.04678C26.8129 3.79204 26.7865 3.52869 26.5174 3.39471ZM13.0143 18.3946C10.6964 16.5724 9.5722 15.9726 9.10816 15.9985C8.67402 16.0244 8.75222 16.5212 8.84768 16.8449C8.94773 17.1646 9.07768 17.3849 9.25996 17.6655C9.38589 17.8512 9.47272 18.1272 9.13404 18.3348C8.38766 18.7965 7.08985 18.1796 7.0289 18.1491C5.51833 17.2595 4.25559 16.0853 3.36546 14.4793C2.50581 12.9337 2.0067 11.2753 1.92447 9.50542C1.90262 9.07818 2.02855 8.92695 2.45406 8.84932C3.01413 8.74582 3.59144 8.72397 4.15093 8.80619C6.51656 9.15178 8.53027 10.2092 10.2185 11.8848C11.1822 12.8388 11.9114 13.979 12.6623 15.0929C13.461 16.2757 14.3201 17.4027 15.4144 18.3268C15.8008 18.6505 16.109 18.8966 16.404 19.0783C15.5144 19.1778 14.0297 19.1991 13.0143 18.3958V18.3946ZM14.1252 11.2489C14.1252 11.0591 14.277 10.9079 14.4679 10.9079C14.511 10.9079 14.5501 10.9165 14.5852 10.9292C14.6329 10.9464 14.6766 10.9723 14.7111 11.0114C14.7721 11.0718 14.8066 11.158 14.8066 11.2489C14.8066 11.4386 14.6548 11.5899 14.4639 11.5899C14.273 11.5899 14.1252 11.4386 14.1252 11.2489ZM17.5759 13.0188C17.3545 13.1096 17.1331 13.1873 16.9203 13.1959C16.5903 13.2131 16.2303 13.0791 16.0348 12.9153C15.7312 12.6605 15.5139 12.5179 15.423 12.0734C15.3839 11.8837 15.4057 11.5899 15.4402 11.4214C15.5185 11.0585 15.4316 10.8257 15.1757 10.614C14.9676 10.4415 14.7025 10.3938 14.4115 10.3938C14.3029 10.3938 14.2034 10.3461 14.1292 10.3076C14.0079 10.2472 13.9078 10.096 14.0033 9.91023C14.0338 9.84985 14.1815 9.70322 14.216 9.67734C14.6111 9.45251 15.0665 9.52612 15.488 9.6946C15.8784 9.85445 16.174 10.1477 16.5989 10.5623C17.033 11.0631 17.1112 11.2011 17.3585 11.5772C17.554 11.871 17.7317 12.1729 17.8536 12.5185C17.9272 12.7341 17.8317 12.9107 17.5759 13.0188Z',
+} as const;
+
+const DOUBAO_ICON_PATHS: Array<{ d: string; opacity?: string }> = [
+    { d: 'M5.31 15.756c.172-3.75 1.883-5.999 2.549-6.739-3.26 2.058-5.425 5.658-6.358 8.308v1.12C1.501 21.513 4.226 24 7.59 24a6.59 6.59 0 002.2-.375c.353-.12.7-.248 1.039-.378.913-.899 1.65-1.91 2.243-2.992-4.877 2.431-7.974.072-7.763-4.5l.002.001z', opacity: '.5' },
+    { d: 'M22.57 10.283c-1.212-.901-4.109-2.404-7.397-2.8.295 3.792.093 8.766-2.1 12.773a12.782 12.782 0 01-2.244 2.992c3.764-1.448 6.746-3.457 8.596-5.219 2.82-2.683 3.353-5.178 3.361-6.66a2.737 2.737 0 00-.216-1.084v-.002zM14.303 1.867C12.955.7 11.248 0 9.39 0 7.532 0 5.883.677 4.545 1.807 2.791 3.29 1.627 5.557 1.5 8.125v9.201c.932-2.65 3.097-6.25 6.357-8.307.5-.318 1.025-.595 1.569-.829 1.883-.801 3.878-.932 5.746-.706-.222-2.83-.718-5.002-.87-5.617h.001z' },
+    { d: 'M17.305 4.961a199.47 199.47 0 01-1.08-1.094c-.202-.213-.398-.419-.586-.622l-1.333-1.378c.151.615.648 2.786.869 5.617 3.288.395 6.185 1.898 7.396 2.8-1.306-1.275-3.475-3.487-5.266-5.323z', opacity: '.5' },
+];
+
+function ModelIcon({ modelId }: { modelId: AiMarkdownModel }) {
+    const isDeepSeek = modelId.startsWith('deepseek-');
+    const isDoubao = modelId.startsWith('ark-') || modelId.toLowerCase().includes('doubao');
+
+    return (
+        <span className="flex h-4 w-4 shrink-0 items-center justify-center text-[#5f6672] dark:text-[#d8d8dc]" aria-hidden="true">
+            <svg viewBox={isDoubao ? '0 0 24 24' : isDeepSeek ? '0 0 27 22' : '146 227 268 265'} className="h-3.5 w-3.5" fill="currentColor">
+                {isDoubao
+                    ? DOUBAO_ICON_PATHS.map((path, index) => <path key={index} d={path.d} fillOpacity={path.opacity} />)
+                    : <path d={isDeepSeek ? OFFICIAL_MODEL_ICON_PATHS.deepseek : OFFICIAL_MODEL_ICON_PATHS.openai} />}
+            </svg>
+        </span>
+    );
+}
+
 export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
     const { isOpen, isDesktop, currentMarkdown, onClose, onApply, onStreamReplace, showNotice } = props;
     const [mode, setMode] = useState<AiMarkdownMode>('format');
@@ -212,6 +685,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [modeDrag, setModeDrag] = useState(0);
     const [isModeDragging, setIsModeDragging] = useState(false);
+    const [isPromptRendered, setIsPromptRendered] = useState(false);
 
     const abortRef = useRef<AbortController | null>(null);
     const streamedRef = useRef('');
@@ -220,6 +694,9 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
     const hasSourceTextRef = useRef(false);
     const sourceTextareaRef = useRef<HTMLTextAreaElement>(null);
     const sourceLengthRef = useRef<HTMLSpanElement>(null);
+    const promptTextareaRef = useRef<HTMLTextAreaElement>(null);
+    const promptOverlayRef = useRef<HTMLDivElement>(null);
+    const promptScrollTopRef = useRef(0);
     const modeTipTimerRef = useRef<number | null>(null);
     const modeTipStartedAtRef = useRef(0);
     const modeTipRemainingRef = useRef(MODE_TIP_DURATION);
@@ -247,6 +724,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
             setSheetHeight(88);
             if (modeTipTimerRef.current) window.clearTimeout(modeTipTimerRef.current);
             setIsModeTipPaused(false);
+            setIsPromptRendered(false);
         }
     }, [isOpen]);
 
@@ -348,13 +826,26 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
             return;
         }
         setExtraInstruction(prev => prev ? `${prev}\n${text}` : text);
-        showNotice('已粘贴', '剪贴板内容已粘贴到额外要求输入框', 'success');
+        showNotice('已粘贴', '剪贴板内容已粘贴到 Prompt 输入框', 'success');
     }, [showNotice]);
+
+    const syncPromptScroll = useCallback((scrollTop: number) => {
+        promptScrollTopRef.current = scrollTop;
+        if (promptOverlayRef.current) promptOverlayRef.current.scrollTop = scrollTop;
+    }, []);
 
     const clearExtraInstruction = useCallback(() => {
         setExtraInstruction('');
-        showNotice('已清除', '额外要求输入框已清空', 'success');
-    }, [showNotice]);
+        setIsPromptRendered(false);
+        syncPromptScroll(0);
+        showNotice('已清除', 'Prompt 输入框已清空', 'success');
+    }, [showNotice, syncPromptScroll]);
+
+    const handleZhouZuoluoClick = useCallback(() => {
+        setExtraInstruction(ZHOUZUOLUO_PROMPT);
+        setIsPromptRendered(true);
+        syncPromptScroll(0);
+    }, [syncPromptScroll]);
 
     const clearExtraFormatting = useCallback(() => {
         setExtraInstruction(prev => removeMarkdownFormatting(prev));
@@ -474,6 +965,14 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
         setMode(nextMode);
         showModeTip(nextMode);
     }, [mode, showModeTip]);
+
+    useEffect(() => {
+        if (isPromptRendered && promptOverlayRef.current) {
+            promptOverlayRef.current.scrollTop = promptScrollTopRef.current;
+        } else if (promptTextareaRef.current) {
+            promptTextareaRef.current.scrollTop = promptScrollTopRef.current;
+        }
+    }, [isPromptRendered]);
 
     const handleModeTouchStart = useCallback((event: ReactTouchEvent) => {
         const touch = event.touches[0];
@@ -690,6 +1189,67 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
         showNotice('修改成功', `速度已切换为 ${item.label}`, 'success');
     };
 
+    const handlePromptOverlayPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+        if (isGenerating || event.button !== 0) return;
+        event.preventDefault();
+
+        const offset = mapRenderedPointToSource(event.currentTarget, extraInstruction, event.clientX, event.clientY);
+        const scrollTop = event.currentTarget.scrollTop;
+        promptScrollTopRef.current = scrollTop;
+        setIsPromptRendered(false);
+
+        requestAnimationFrame(() => {
+            const textarea = promptTextareaRef.current;
+            if (!textarea) return;
+            const nextOffset = Math.min(offset, textarea.value.length);
+            textarea.focus({ preventScroll: true });
+            textarea.setSelectionRange(nextOffset, nextOffset);
+            textarea.scrollTop = scrollTop;
+        });
+    }, [extraInstruction, isGenerating]);
+
+    const renderPromptField = (mobile: boolean) => (
+        <div className={mobile ? 'relative flex min-h-0 flex-1 flex-col' : 'relative min-h-0 flex-1'}>
+            <textarea
+                ref={promptTextareaRef}
+                data-testid="ai-extra-instruction"
+                value={extraInstruction}
+                onChange={(e) => setExtraInstruction(e.target.value)}
+                onScroll={(e) => syncPromptScroll(e.currentTarget.scrollTop)}
+                onFocus={() => setIsPromptRendered(false)}
+                onBlur={(e) => {
+                    syncPromptScroll(e.currentTarget.scrollTop);
+                    if (extraInstruction.trim()) setIsPromptRendered(true);
+                }}
+                className={`${promptFieldClass} ${mobile ? 'h-full min-h-[72px] flex-1' : 'h-full min-h-[160px] flex-1'} ${isPromptRendered && extraInstruction ? 'text-transparent caret-transparent' : ''}`}
+                placeholder={mode === 'format' ? '' : '例如：改成更适合公众号发布的表达，但不要加入新事实'}
+                disabled={isGenerating}
+            />
+            {isPromptRendered && extraInstruction && (
+                <div
+                    ref={promptOverlayRef}
+                    aria-hidden="true"
+                    onPointerDown={handlePromptOverlayPointerDown}
+                    onScroll={(event) => { promptScrollTopRef.current = event.currentTarget.scrollTop; }}
+                    className={promptOverlayClass}
+                    dangerouslySetInnerHTML={{ __html: md.render(extraInstruction) }}
+                />
+            )}
+            {mode === 'format' && !extraInstruction && (
+                <div className="pointer-events-none absolute left-3 top-2.5 flex flex-wrap items-center gap-1 text-[13px] text-[#9a9aa0]">
+                    <span>例如：保留原文顺序，适当加标题和重点加粗</span>
+                    <button
+                        type="button"
+                        onClick={handleZhouZuoluoClick}
+                        className={`pointer-events-auto inline-flex items-center rounded-[4px] bg-[#eef0f4] px-1.5 py-0.5 text-[11px] font-medium text-[#4b5563] transition-colors active:scale-95 dark:bg-[#2c2c2e] dark:text-[#d1d1d6] ${mobile ? 'active:bg-[#e4e7ec] dark:active:bg-[#3a3a3c]' : 'hover:bg-[#e4e7ec] dark:hover:bg-[#3a3a3c]'}`}
+                    >
+                        粥左罗
+                    </button>
+                </div>
+            )}
+        </div>
+    );
+
     const renderSettingsControl = ({ mobile = false }: { mobile?: boolean } = {}) => {
         const selectedModel = modelOptions.find(item => item.id === model) ?? modelOptions[0] ?? aiMarkdownModels[0];
         const selectedSpeed = aiMarkdownSpeeds.find(item => item.id === speed) ?? aiMarkdownSpeeds[0];
@@ -732,7 +1292,8 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                     })}
                     className={`flex h-7 cursor-pointer select-none items-center gap-1.5 rounded-md bg-[#eef0f4] px-2.5 text-[12px] font-medium text-[#1d1d1f] shadow-[inset_0_0_0_1px_rgba(29,29,31,0.08)] transition-colors ${mobile ? 'active:bg-[#e4e7ec] dark:active:bg-[#3b3b3e]' : 'hover:bg-[#e4e7ec] dark:hover:bg-[#3b3b3e]'} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 dark:bg-[#303033] dark:text-[#f5f5f7] dark:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.07)] ${isGenerating ? 'cursor-not-allowed opacity-55' : ''}`}
                 >
-                    <span>{selectedModel.shortLabel}</span>
+                    <ModelIcon modelId={selectedModel.id} />
+                    <span>{selectedModel.label}</span>
                     <ChevronDown size={12} className="text-[#69707d] dark:text-[#b8b8bd]" />
                 </button>
                 <AnimatePresence initial={false}>
@@ -774,7 +1335,10 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                                     }}
                                     className={`${menuItemClass} ${mobile && settingsSubmenu === 'model' ? selectedItemClass : 'bg-black/[0.04] dark:bg-white/5'}`}
                                 >
-                                    <span>{selectedModel.label}</span>
+                                    <span className="flex min-w-0 items-center gap-2">
+                                        <ModelIcon modelId={selectedModel.id} />
+                                        <span>{selectedModel.label}</span>
+                                    </span>
                                     <ChevronRight size={13} className="text-[#69707d] dark:text-[#a1a1a6]" />
                                 </button>
                                 <div
@@ -791,8 +1355,11 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                                             onClick={() => changeModel(item.id)}
                                             className={`${menuItemClass} ${model === item.id ? selectedItemClass : ''}`}
                                         >
-                                            <span>{item.label}</span>
-                                            {model === item.id && <Check size={13} />}
+                                            <span className="flex min-w-0 items-center gap-2">
+                                                <ModelIcon modelId={item.id} />
+                                                <span>{item.label}</span>
+                                            </span>
+                                            {model === item.id && <Check size={13} className="shrink-0" />}
                                         </button>
                                     ))}
                                 </div>
@@ -898,9 +1465,9 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
     };
 
     const inputPane = (
-        <section className="space-y-3">
-            <div>{renderModeSwitch()}</div>
-            <div>
+        <section className="flex min-h-0 flex-col gap-3">
+            <div className="shrink-0">{renderModeSwitch()}</div>
+            <div className="flex min-h-0 flex-[1.6] flex-col">
                 <div className="mb-2 flex items-center justify-between gap-2">
                     <span className="flex items-center gap-1">
                         <span className={labelClass}>纯文本内容</span>
@@ -916,18 +1483,18 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                         <span ref={sourceLengthRef} className="text-[11px] text-[#86868b] dark:text-[#8e8e93]">{sourceTextRef.current.length} 字</span>
                     </span>
                     <span className="flex items-center gap-1.5">
-                        <button type="button" onClick={() => void pasteSourceText()} disabled={isGenerating} className={ghostButton}>
-                            <Clipboard size={12} />
+                        <button type="button" onClick={() => void pasteSourceText()} disabled={isGenerating} className={desktopFieldButton}>
+                            <Clipboard size={11} />
                             粘贴
                         </button>
                         {hasSourceText && (
                             <>
-                                <button type="button" onClick={clearSourceFormatting} disabled={isGenerating} className={ghostButton}>
-                                    <RemoveFormatting size={12} />
+                                <button type="button" onClick={clearSourceFormatting} disabled={isGenerating} className={desktopFieldButton}>
+                                    <RemoveFormatting size={11} />
                                     清除格式
                                 </button>
-                                <button type="button" onClick={clearSourceText} disabled={isGenerating} className={ghostButton}>
-                                    <Eraser size={12} />
+                                <button type="button" onClick={clearSourceText} disabled={isGenerating} className={desktopFieldButton}>
+                                    <Eraser size={11} />
                                     清除
                                 </button>
                             </>
@@ -940,19 +1507,19 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                     aria-label="纯文本内容"
                     defaultValue={sourceTextRef.current}
                     onInput={(e) => syncSourceText(e.currentTarget.value)}
-                    className={`${fieldClass} h-[238px]`}
+                    className={`${fieldClass} h-full min-h-[360px] flex-1`}
                     placeholder="粘贴需要转换的纯文本..."
                     disabled={isGenerating}
                 />
             </div>
 
-            <label className="block">
+            <div className="flex min-h-0 flex-[1.1] flex-col">
                 <div className="mb-2 flex items-center justify-between gap-2">
                     <span className="flex items-center gap-1">
-                        <span className={labelClass}>额外要求</span>
+                        <span className={labelClass}>Prompt</span>
                         <button
                             type="button"
-                            aria-label="复制额外要求"
+                            aria-label="复制 Prompt"
                             disabled={copiedFields.extra || !extraInstruction}
                             onClick={() => void copyField('extra', extraInstruction)}
                             className={iconButton}
@@ -962,33 +1529,26 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                         <span className="text-[11px] text-[#86868b] dark:text-[#8e8e93]">{extraInstruction.length} 字</span>
                     </span>
                     <span className="flex items-center gap-1.5">
-                        <button type="button" onClick={() => void pasteExtraInstruction()} disabled={isGenerating} className={ghostButton}>
-                            <Clipboard size={12} />
+                        <button type="button" onClick={() => void pasteExtraInstruction()} disabled={isGenerating} className={desktopFieldButton}>
+                            <Clipboard size={11} />
                             粘贴
                         </button>
                         {extraInstruction && (
                             <>
-                                <button type="button" onClick={clearExtraFormatting} disabled={isGenerating} className={ghostButton}>
-                                    <RemoveFormatting size={12} />
+                                <button type="button" onClick={clearExtraFormatting} disabled={isGenerating} className={desktopFieldButton}>
+                                    <RemoveFormatting size={11} />
                                     清除格式
                                 </button>
-                                <button type="button" onClick={clearExtraInstruction} disabled={isGenerating} className={ghostButton}>
-                                    <Eraser size={12} />
+                                <button type="button" onClick={clearExtraInstruction} disabled={isGenerating} className={desktopFieldButton}>
+                                    <Eraser size={11} />
                                     清除
                                 </button>
                             </>
                         )}
                     </span>
                 </div>
-                <textarea
-                    data-testid="ai-extra-instruction"
-                    value={extraInstruction}
-                    onChange={(e) => setExtraInstruction(e.target.value)}
-                    className={`${fieldClass} h-24`}
-                    placeholder={mode === 'format' ? '例如：保留原文顺序，适当加标题和重点加粗' : '例如：改成更适合公众号发布的表达，但不要加入新事实'}
-                    disabled={isGenerating}
-                />
-            </label>
+                {renderPromptField(false)}
+            </div>
         </section>
     );
 
@@ -1040,13 +1600,13 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                 />
             </div>
 
-            <label className="flex min-h-0 flex-1 flex-col">
+            <div className="flex min-h-0 flex-1 flex-col">
                 <div className="mb-2 flex shrink-0 items-center justify-between gap-2">
                     <span className="flex items-center gap-1">
-                        <span className={labelClass}>额外要求</span>
+                        <span className={labelClass}>Prompt</span>
                         <button
                             type="button"
-                            aria-label="复制额外要求"
+                            aria-label="复制 Prompt"
                             disabled={copiedFields.extra || !extraInstruction}
                             onClick={() => void copyField('extra', extraInstruction)}
                             className={iconButton}
@@ -1074,15 +1634,8 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                         )}
                     </span>
                 </div>
-                <textarea
-                    data-testid="ai-extra-instruction"
-                    value={extraInstruction}
-                    onChange={(e) => setExtraInstruction(e.target.value)}
-                    className={`${fieldClass} h-full min-h-[72px] flex-1`}
-                    placeholder={mode === 'format' ? '例如：保留原文顺序，适当加标题和重点加粗' : '例如：改成更适合公众号发布的表达，但不要加入新事实'}
-                    disabled={isGenerating}
-                />
-            </label>
+                {renderPromptField(true)}
+            </div>
         </section>
     );
 
@@ -1249,14 +1802,14 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                     />
 
                     {isDesktop ? (
-                        <div className="fixed inset-0 z-[201] flex items-center justify-center p-6">
+                        <div className="fixed inset-0 z-[201] flex items-center justify-center p-4">
                             <motion.div
                                 data-testid="ai-desktop-modal"
                                 initial={{ opacity: 0, y: 10, scale: 0.98 }}
                                 animate={{ opacity: 1, y: 0, scale: 1 }}
                                 exit={{ opacity: 0, y: 10, scale: 0.98 }}
                                 transition={{ duration: 0.18, ease: [0.25, 0.1, 0.25, 1] }}
-                                className={`${showOutput ? 'w-[960px]' : 'w-[520px]'} grid max-h-[90vh] max-w-[calc(100vw-48px)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-lg bg-[#fbfcfe] shadow-[0_28px_80px_rgba(15,23,42,0.22)] dark:bg-[#1c1c1e]`}
+                                className={`${showOutput ? 'h-[min(96vh,920px)] w-[1500px]' : 'h-[min(96vh,860px)] w-[900px]'} grid max-w-[calc(100vw-32px)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-lg bg-[#fbfcfe] shadow-[0_28px_80px_rgba(15,23,42,0.22)] dark:bg-[#1c1c1e]`}
                             >
                                 <header className="flex items-center justify-between gap-3 px-5 pb-2 pt-5">
                                     <div className="flex min-w-0 items-center gap-2">
@@ -1267,7 +1820,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                                         <X size={18} />
                                     </button>
                                 </header>
-                                <main className={`grid min-h-0 ${showOutput ? 'grid-cols-[0.86fr_1.14fr] gap-4' : 'grid-cols-1'} overflow-hidden px-5 py-3`}>
+                                <main className={`grid min-h-0 ${showOutput ? 'grid-cols-[0.95fr_1.05fr] gap-6' : 'grid-cols-1'} overflow-hidden px-7 py-4`}>
                                     {inputPane}
                                     {showOutput && renderOutputPane()}
                                 </main>
