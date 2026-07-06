@@ -3,8 +3,8 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { PenLine, Eye, Minimize2 } from 'lucide-react';
 import html2pdf from 'html2pdf.js';
 import { md, preprocessMarkdown, applyTheme } from './lib/markdown';
-import { markElementIndexes } from './lib/markdownIndexer';
-import { makeWeChatCompatible, cleanInternalAttributes } from './lib/wechatCompat';
+import { markElementIndexes, stripIndexMarkers } from './lib/markdownIndexer';
+import { makeWeChatCompatible } from './lib/wechatCompat';
 import { THEMES } from './lib/themes';
 import { defaultContent } from './defaultContent';
 import { findImagePosition, selectTextAreaRange } from './lib/imageSelector';
@@ -21,6 +21,8 @@ import CopyToast, { type Notice } from './components/CopyToast';
 import Tooltip from './components/Tooltip';
 import AiMarkdownDialog from './components/AiMarkdownDialog';
 import { cleanAiMarkdown, streamAiMarkdown, type AiApplyMode, type AiMarkdownRequest } from './lib/aiMarkdown';
+import { saveBlob } from './lib/fileSave';
+import { isInIframe, fallbackCopyText, fallbackCopyHtml } from './lib/clipboard';
 
 const SPLIT_RATIO_STORAGE_KEY = 'marka:splitRatio';
 const SPLIT_RATIO_DEFAULT = 38.2;
@@ -77,81 +79,6 @@ function computeRatioBounds(containerWidth: number, previewMinPx: number): { min
 // 钳制 ratio 到指定区间
 const clampRatio = (ratio: number, bounds: { min: number; max: number }) =>
     Math.min(bounds.max, Math.max(bounds.min, ratio));
-
-/**
- * 保存 Blob 到文件。
- * 支持.showSaveFilePicker 时弹窗让用户选位置并写入，await 真实完成；
- * 否则降级为 a.click() 立即下载。
- * 返回 true=已保存，false=用户取消。
- */
-async function saveBlob(blob: Blob, filename: string, ext: string, label: string): Promise<boolean> {
-    const baseMime = blob.type.split(';')[0].trim() || 'application/octet-stream';
-    const doAnchorDownload = () => {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        a.click();
-        URL.revokeObjectURL(url);
-    };
-    try {
-        const w = window as unknown as { showSaveFilePicker?: (opts: unknown) => Promise<{ createWritable: () => Promise<{ write: (d: Blob) => Promise<void>; close: () => Promise<void> }> }> };
-        if (w.showSaveFilePicker) {
-            try {
-                const handle = await w.showSaveFilePicker({
-                    suggestedName: filename,
-                    types: [{ description: label, accept: { [baseMime]: [ext] } }],
-                });
-                const writable = await handle.createWritable();
-                await writable.write(blob);
-                await writable.close();
-                return true;
-            } catch (pickerErr) {
-                if (pickerErr instanceof DOMException && pickerErr.name === 'AbortError') return false;
-                console.warn('showSaveFilePicker failed, falling back to anchor download:', pickerErr);
-                doAnchorDownload();
-                return true;
-            }
-        } else {
-            doAnchorDownload();
-        }
-        return true;
-    } catch (err) {
-        if (err instanceof DOMException && err.name === 'AbortError') return false;
-        throw err;
-    }
-}
-
-function isInIframe(): boolean {
-    try {
-        return typeof window !== 'undefined' && window.self !== window.top;
-    } catch {
-        return true;
-    }
-}
-
-// 剪贴板回退方案：当 Clipboard API 不可用时使用 execCommand
-function fallbackCopyText(text: string): void {
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.style.position = 'fixed';
-    ta.style.opacity = '0';
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
-}
-
-function fallbackCopyHtml(html: string): void {
-    const listener = (e: ClipboardEvent) => {
-        e.clipboardData?.setData('text/html', html);
-        e.clipboardData?.setData('text/plain', html.replace(/<[^>]*>/g, ''));
-        e.preventDefault();
-    };
-    document.addEventListener('copy', listener);
-    document.execCommand('copy');
-    document.removeEventListener('copy', listener);
-}
 
 type AiEditorStream = { phase: 'idle' | 'connecting' | 'thinking' | 'streaming'; chars: number };
 const AI_CONNECTING_MS = 500;
@@ -250,6 +177,8 @@ export default function App() {
     const aiStreamAbortRef = useRef<AbortController | null>(null);
     const scrollSyncLockRef = useRef<'editor' | 'preview' | null>(null);
     const scrollLockReleaseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const activePanelRef = useRef(activePanel);
+    activePanelRef.current = activePanel;
 
     const [swipeDx, setSwipeDx] = useState(0);
     const [isSwiping, setIsSwiping] = useState(false);
@@ -268,12 +197,8 @@ export default function App() {
         return () => { clearTimeout(timer); ro.disconnect(); };
     }, [isDesktop, activePanel, activeTheme]);
 
-    const tabIndicatorX = useMemo(() => {
-        const w = mobileWidth || 390;
-        const base = activePanel === 'editor' ? 0 : 1;
-        const drag = activePanel === 'editor' ? Math.max(0, Math.min(1, -swipeDx / w)) : -Math.max(0, Math.min(1, swipeDx / w));
-        return base + drag;
-    }, [activePanel, swipeDx, mobileWidth]);
+    const w = mobileWidth || 390;
+    const tabIndicatorX = activePanel === 'editor' ? Math.min(1, -swipeDx / w) : 1 - Math.min(1, swipeDx / w);
 
     useEffect(() => {
         if (isDesktop) return;
@@ -281,11 +206,9 @@ export default function App() {
         if (!el) return;
 
         let startX = 0, startY = 0, locked: boolean | 'h' | 'v' = false, dx = 0, rafId: number | null = null;
-
-        const updateWidth = () => { setMobileWidth(el.clientWidth); };
-        const ro = new ResizeObserver(updateWidth);
+        const ro = new ResizeObserver(() => setMobileWidth(el.clientWidth));
         ro.observe(el);
-        updateWidth();
+        setMobileWidth(el.clientWidth);
 
         const onStart = (e: TouchEvent) => {
             if (e.touches.length !== 1) return;
@@ -297,8 +220,7 @@ export default function App() {
 
         const onMove = (e: TouchEvent) => {
             if (e.touches.length !== 1) return;
-            const t = e.touches[0];
-            const dX = t.clientX - startX, dY = t.clientY - startY;
+            const dX = e.touches[0].clientX - startX, dY = e.touches[0].clientY - startY;
             if (!locked) {
                 if (Math.abs(dX) < 8 && Math.abs(dY) < 8) return;
                 locked = Math.abs(dX) > Math.abs(dY) * 1.3 ? 'h' : 'v';
@@ -308,19 +230,20 @@ export default function App() {
                 e.preventDefault();
                 e.stopPropagation();
                 const w = el.clientWidth;
-                dx = activePanel === 'editor' ? Math.min(0, Math.max(-w, dX)) : Math.min(w, Math.max(0, dX));
-                if (rafId === null) {
-                    rafId = requestAnimationFrame(() => { setSwipeDx(dx); rafId = null; });
-                }
+                dx = activePanelRef.current === 'editor' ? Math.min(0, Math.max(-w, dX)) : Math.min(w, Math.max(0, dX));
+                if (rafId === null) rafId = requestAnimationFrame(() => { setSwipeDx(dx); rafId = null; });
             }
         };
 
         const onEnd = () => {
             if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
             if (locked === 'h') {
-                const w = el.clientWidth;
-                if (Math.abs(dx) > w * 0.2) setActivePanel(activePanel === 'editor' ? 'preview' : 'editor');
-                setSwipeDx(0); setIsSwiping(false);
+                const shouldSwitch = Math.abs(dx) > el.clientWidth * 0.2;
+                setIsSwiping(false);
+                requestAnimationFrame(() => {
+                    if (shouldSwitch) setActivePanel(p => p === 'editor' ? 'preview' : 'editor');
+                    setSwipeDx(0);
+                });
             }
             locked = false;
         };
@@ -331,7 +254,6 @@ export default function App() {
         el.addEventListener('touchmove', onMove, moveOpts);
         el.addEventListener('touchend', onEnd, passiveOpts);
         el.addEventListener('touchcancel', onEnd, passiveOpts);
-
         return () => {
             ro.disconnect();
             el.removeEventListener('touchstart', onStart, passiveOpts);
@@ -339,7 +261,7 @@ export default function App() {
             el.removeEventListener('touchend', onEnd, passiveOpts);
             el.removeEventListener('touchcancel', onEnd, passiveOpts);
         };
-    }, [isDesktop, activePanel]);
+    }, [isDesktop]);
 
     const resetScrollSyncLock = useCallback(() => {
         scrollSyncLockRef.current = null;
@@ -766,7 +688,7 @@ export default function App() {
     };
 
     const handleExportHtml = async () => {
-        const blob = new Blob([cleanInternalAttributes(renderedHtml)], { type: 'text/html;charset=utf-8' });
+        const blob = new Blob([stripIndexMarkers(renderedHtml)], { type: 'text/html;charset=utf-8' });
         const filename = `Marka_Article_${Date.now()}.html`;
         try {
             const saved = await saveBlob(blob, filename, '.html', 'HTML 文档');

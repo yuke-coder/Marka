@@ -1,16 +1,7 @@
 import { THEMES } from './themes';
-import { stripIndexMarkers } from './markdownIndexer';
 
-/**
- * Remove internal editor attributes from HTML
- * Used when exporting to avoid including internal implementation details
- *
- * This is now a thin wrapper around stripIndexMarkers from the indexing layer.
- * Keeping this function for backward compatibility.
- */
-export function cleanInternalAttributes(html: string): string {
-    return stripIndexMarkers(html);
-}
+// 0. Remove internal editor attributes (for click-to-locate feature)
+// These are only used in the editor and should not appear in the final HTML
 
 // Helper to convert images to Base64
 async function getBase64Image(imgUrl: string): Promise<string> {

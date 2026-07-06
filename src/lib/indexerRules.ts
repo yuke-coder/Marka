@@ -16,7 +16,7 @@ export type ElementType = 'heading' | 'paragraph' | 'list' | 'quote' | 'code' | 
 /**
  * 所有元素类型列表
  */
-export const ELEMENT_TYPES: readonly ElementType[] = [
+const ELEMENT_TYPES: readonly ElementType[] = [
   'heading',
   'paragraph',
   'list',

@@ -9,7 +9,7 @@ export interface AiMarkdownModelOption {
     label: string;
 }
 
-export const DOUBAO_SEED_MODEL = 'doubao-seed-2-1-pro-260628';
+const DOUBAO_SEED_MODEL = 'doubao-seed-2-1-pro-260628';
 export const DEFAULT_AI_MARKDOWN_MODEL: AiMarkdownModel = DOUBAO_SEED_MODEL;
 export const DEFAULT_AI_REASONING_EFFORT: AiReasoningEffort = 'low';
 export const DEFAULT_AI_MARKDOWN_SPEED: AiMarkdownSpeed = 'standard';

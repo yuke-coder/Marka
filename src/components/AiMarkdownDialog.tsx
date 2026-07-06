@@ -22,6 +22,10 @@ import {
     type AiMarkdownSpeed,
     type AiReasoningEffort,
 } from '../lib/aiMarkdown';
+import { ZHOUZUOLUO_PROMPT } from '../lib/prompts/zhouZuoluo';
+import { readClipboardText } from '../lib/clipboard';
+import { removeMarkdownFormatting } from '../lib/markdownUtils';
+import { mapRenderedPointToSource } from '../lib/promptCaret';
 
 interface AiMarkdownDialogProps {
     isOpen: boolean;
@@ -60,577 +64,15 @@ const MODE_TIP_DURATION = 3200;
 const fieldClass = 'w-full resize-none rounded-md bg-white px-3 py-2.5 text-[13px] leading-6 text-[#1d1d1f] shadow-[inset_0_0_0_1px_rgba(29,29,31,0.1)] outline-none transition placeholder-[#9a9aa0] focus:shadow-[inset_0_0_0_1px_#0a84ff,0_0_0_3px_rgba(10,132,255,0.14)] dark:bg-[#171719] dark:text-[#f5f5f7] dark:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.12)] disabled:opacity-70';
 const ghostButton = 'inline-flex h-8 items-center justify-center gap-1.5 rounded-md bg-[#eef0f4] px-3 text-[12px] font-medium text-[#4b5563] transition-colors hover:bg-[#e4e7ec] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#2c2c2e] dark:text-[#d1d1d6] dark:hover:bg-[#3a3a3c]';
 const desktopFieldButton = 'inline-flex h-7 items-center justify-center gap-1 rounded-md bg-[#eef0f4] px-2 text-[11px] font-medium text-[#4b5563] transition-colors hover:bg-[#e4e7ec] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#2c2c2e] dark:text-[#d1d1d6] dark:hover:bg-[#3a3a3c]';
-const compactGhostButton = 'inline-flex h-[clamp(22px,calc(var(--sh)*0.055),44px)] items-center justify-center gap-1 rounded-md bg-[#eef0f4] px-[clamp(8px,calc(var(--sh)*0.022),20px)] py-0 text-[clamp(10px,calc(var(--sh)*0.018),15px)] font-medium text-[#4b5563] transition-colors active:bg-[#e4e7ec] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#2c2c2e] dark:text-[#d1d1d6] dark:active:bg-[#3a3a3c]';
+const compactGhostButton = 'inline-flex h-[clamp(20px,calc(var(--sh)*0.03),28px)] items-center justify-center gap-1 rounded-md bg-[#eef0f4] px-[clamp(6px,calc(var(--sh)*0.012),12px)] py-0 text-[clamp(10px,calc(var(--sh)*0.012),12px)] font-medium text-[#4b5563] transition-colors active:bg-[#e4e7ec] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#2c2c2e] dark:text-[#d1d1d6] dark:active:bg-[#3a3a3c]';
 const compactFieldButton = 'inline-flex h-7 items-center justify-center gap-1 rounded-md bg-[#eef0f4] px-2 text-[11px] font-medium text-[#4b5563] transition-colors active:bg-[#e4e7ec] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#2c2c2e] dark:text-[#d1d1d6] dark:active:bg-[#3a3a3c]';
 const primaryButton = 'inline-flex h-8 items-center justify-center gap-1.5 rounded-md bg-[#1d1d1f] px-3.5 text-[12px] font-semibold text-white transition-colors hover:bg-[#2f3137] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 disabled:cursor-not-allowed disabled:opacity-55 dark:bg-[#f5f5f7] dark:text-black';
-const compactPrimaryButton = 'inline-flex h-[clamp(22px,calc(var(--sh)*0.055),44px)] items-center justify-center gap-1 rounded-md bg-[#1d1d1f] px-[clamp(8px,calc(var(--sh)*0.026),22px)] py-0 text-[clamp(10px,calc(var(--sh)*0.018),15px)] font-semibold text-white transition-colors active:bg-[#2f3137] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 disabled:cursor-not-allowed disabled:opacity-55 dark:bg-[#f5f5f7] dark:text-black';
+const compactPrimaryButton = 'inline-flex h-[clamp(20px,calc(var(--sh)*0.03),28px)] items-center justify-center gap-1 rounded-md bg-[#1d1d1f] px-[clamp(6px,calc(var(--sh)*0.014),14px)] py-0 text-[clamp(10px,calc(var(--sh)*0.012),12px)] font-semibold text-white transition-colors active:bg-[#2f3137] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 disabled:cursor-not-allowed disabled:opacity-55 dark:bg-[#f5f5f7] dark:text-black';
 const labelClass = 'text-[12px] font-semibold text-[#4f5866] dark:text-[#c7c7cc]';
 const iconButton = 'inline-flex h-5 w-5 items-center justify-center rounded-[4px] bg-transparent text-[#86868b] transition-colors hover:bg-black/[0.06] hover:text-[#4b5563] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/30 disabled:cursor-not-allowed disabled:opacity-30 dark:text-[#8e8e93] dark:hover:bg-white/[0.07] dark:hover:text-[#c7c7cc]';
 const promptSurfaceClass = 'rounded-md bg-white px-3 py-2.5 text-[13px] leading-6 text-[#1d1d1f] shadow-[inset_0_0_0_1px_rgba(29,29,31,0.1)] outline-none [scrollbar-gutter:stable] dark:bg-[#171719] dark:text-[#f5f5f7] dark:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.12)]';
 const promptFieldClass = `w-full resize-none placeholder-[#9a9aa0] focus-visible:shadow-[inset_0_0_0_1px_#0a84ff] disabled:opacity-70 ${promptSurfaceClass}`;
 const promptOverlayClass = `absolute inset-0 overflow-auto ${promptSurfaceClass} [&_*]:text-[inherit] [&_*]:leading-[inherit] [&_h1]:my-0 [&_h1]:text-[15px] [&_h1]:font-bold [&_h2]:my-0 [&_h2]:text-[14px] [&_h2]:font-semibold [&_h3]:my-0 [&_h3]:font-semibold [&_p]:my-0 [&_ul]:my-0 [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:my-0 [&_ol]:list-decimal [&_ol]:pl-4 [&_li]:my-0 [&_blockquote]:my-0 [&_blockquote]:border-l-2 [&_blockquote]:border-[#d0d7de] [&_blockquote]:pl-2 [&_pre]:my-0 [&_pre]:overflow-auto [&_pre]:rounded [&_pre]:bg-[#f5f5f7] [&_pre]:p-2 dark:[&_pre]:bg-[#262628] [&_code]:font-inherit`;
-
-const ZHOUZUOLUO_PROMPT = `# 角色设定
-
-你是粥左罗公众号的排版设计师。你需要用纯 Markdown 源码（内嵌 HTML/CSS style 属性）生成一篇完整还原粥左罗微信公众号文章视觉排版的文章。所有样式必须写在每个元素的 \`style=""\` 内联属性中，禁止使用 CSS 类名、外部样式表或 \`<style>\` 标签。
-
----
-
-# 核心约束
-
-当前任务为存量原始文本纯格式化重排版，请勿擅自执行文本生成或内容改写操作，仅负责调整文本版式结构。
-
----
-
-# 一、全局视觉参数（像素级精确）
-
-## 1.1 正文段落
-- 字号：18px
-- 颜色：#3f3f3f（非纯黑，手机端更柔和）
-- 行高：1.75
-- 字间距：1px
-- 对齐：两端对齐（text-align: justify）
-- 词内断行：word-break: break-all
-- 两端缩进：padding: 0 16px
-- 段间距：每个 \`<p>\` 标签 margin: 0 0 20px 0
-- 段首：不缩进（text-indent: 0），不空格
-
-## 1.2 加粗/强调文字
-- 颜色：#000000（纯黑，与正文 #3f3f3f 形成层次对比）
-- 标签：\`<strong style="color:#000000;">文字</strong>\`
-- 不使用 Markdown \`**加粗**\` 语法
-
-## 1.3 品牌色
-- 主色：\`#fa8c16\`（暖橙色，向上生长品牌基调）
-- 浅底色：\`#fdf6ec\`（品牌色 6% 透明度，金句底色块）
-- 浅边框：\`#e8e8e8\`（模块分隔线）
-
-## 1.4 注释/辅助文字
-- 字号：16px（大注释）、15px（小注释/图注）
-- 颜色：#888888
-
-## 1.5 大标题（文章主标题）
-- 字号：24px
-- 颜色：#000000
-- 加粗：font-weight: bold
-- 行高：1.5
-- 字间距：1px
-- 对齐：居中
-- 上下边距：margin: 24px 16px
-
-## 1.6 模块编号（01、02、03...）
-- 字号：20px
-- 颜色：#000000
-- 加粗：font-weight: bold
-- 对齐：居中
-- 上下边距：margin: 30px 0 8px 0
-- 独立一行，前后有间距
-
-## 1.7 小标题（模块主标题 + 副标题）
-- 主标题：字号 20px，颜色 #000000，加粗，居中，margin: 0 0 4px 0
-- 副标题：字号 20px，颜色 #000000，加粗，居中，margin: 0 0 20px 0
-- 部分小标题只有一行
-
-## 1.8 重点底色块（金句/核心观点）
-- 背景色：#fdf6ec
-- 左边框：4px solid #fa8c16
-- 圆角：0 4px 4px 0（左侧直角贴边，右侧圆角）
-- 内边距：20px 16px
-- 外边距：margin: 24px 16px
-- 内部文字：保持正文规范（18px / #3f3f3f / 1.75 / 两端对齐）
-
-## 1.9 全背景金句块（结尾升华金句）
-- 背景色：#fdf6ec
-- 圆角：8px（四角统一）
-- 内边距：28px 20px
-- 外边距：margin: 36px 16px
-- 对齐：居中
-- 文字：字号 18px，加粗，颜色 #000000，行高 1.8，字间距 1px
-
-## 1.10 图片 + 图注
-- 图片：max-width: 100%，border-radius: 4px，居中容器
-- 图注：字号 15px，颜色 #888888，紧贴图片（margin-top: 8px），居中
-- 图片与图注之间不留白（保持整体性）
-
-## 1.11 分割线
-- Markdown 三个短横 \`---\`
-
----
-
-# 二、文章结构模板（按此顺序）
-
-## 2.1 期数标签
-
-\`\`\`html
-<div style="text-align: center; margin: 16px 0 20px 0;">
-  <span style="font-size: 16px; color: #888888;">
-    这是余客的第 <strong style="color:#000000;">N</strong> 期分享
-  </span>
-</div>
-\`\`\`
-
-## 2.2 分割线
-
-\`\`\`html
----
-\`\`\`
-
-## 2.3 作者信息
-
-\`\`\`html
-<div style="text-align: center; margin: 20px 0 4px 0;">
-  <span style="font-size: 16px; color: #888888;">
-    作者 l XXX &nbsp;&nbsp; 编辑 l XXX
-  </span>
-</div>
-\`\`\`
-
-## 2.4 来源信息
-
-\`\`\`html
-<div style="text-align: center; margin: 4px 0;">
-  <span style="font-size: 16px; color: #888888;">
-    来源 l 粥左罗（ID：fangdushe520）
-  </span>
-</div>
-\`\`\`
-
-## 2.5 转载授权
-
-\`\`\`html
-<div style="text-align: center; margin: 4px 0 30px 0;">
-  <span style="font-size: 16px; color: #888888;">
-    转载请联系授权（微信ID：zzlloveutoo）
-  </span>
-</div>
-\`\`\`
-
-## 2.6 正文开头
-
-\`\`\`html
-<div style="font-size: 18px; color: #3f3f3f; line-height: 1.75; letter-spacing: 1px; text-align: justify; word-break: break-all; padding: 0 16px;">
-
-<p style="margin: 0 0 20px 0;">
-【原文段落】
-</p>
-
-</div>
-\`\`\`
-
-## 2.7 模块编号（01、02、03...）
-
-\`\`\`html
-<p style="text-align: center; font-size: 20px; font-weight: bold; color: #000000; margin: 30px 0 8px 0;">
-  【原文编号】
-</p>
-\`\`\`
-
-## 2.8 小标题
-
-\`\`\`html
-<!-- 两行小标题 -->
-<p style="text-align: center; font-size: 20px; font-weight: bold; color: #000000; margin: 0 0 4px 0;">
-  【原文小标题第一行】
-</p>
-<p style="text-align: center; font-size: 20px; font-weight: bold; color: #000000; margin: 0 0 20px 0;">
-  【原文小标题第二行】
-</p>
-
-<!-- 或单行 -->
-<p style="text-align: center; font-size: 20px; font-weight: bold; color: #000000; margin: 0 0 20px 0;">
-  【原文小标题】
-</p>
-\`\`\`
-
-## 2.9 正文容器
-
-\`\`\`html
-<div style="font-size: 18px; color: #3f3f3f; line-height: 1.75; letter-spacing: 1px; text-align: justify; word-break: break-all; padding: 0 16px;">
-
-<p style="margin: 0 0 20px 0;">
-【原文段落】
-</p>
-
-<p style="margin: 0 0 20px 0;">
-<strong style="color:#000000;">【原文加粗句】</strong>
-</p>
-
-</div>
-\`\`\`
-
-## 2.10 重点底色块（金句/核心观点）
-
-\`\`\`html
-<div style="margin: 24px 16px; padding: 20px 16px; background-color: #fdf6ec; border-left: 4px solid #fa8c16; border-radius: 0 4px 4px 0;">
-  <p style="font-size: 18px; color: #3f3f3f; line-height: 1.75; letter-spacing: 1px; text-align: justify; margin: 0 0 12px 0;">
-    <strong style="color:#000000;">【原文金句】</strong>
-  </p>
-  <p style="font-size: 18px; color: #3f3f3f; line-height: 1.75; letter-spacing: 1px; text-align: justify; margin: 0;">
-    <strong style="color:#000000;">【原文金句】</strong>
-  </p>
-</div>
-\`\`\`
-
-## 2.11 结尾金句块
-
-\`\`\`html
-<div style="margin: 36px 16px; padding: 28px 20px; background-color: #fdf6ec; border-radius: 8px; text-align: center;">
-  <p style="font-size: 18px; font-weight: bold; color: #000000; line-height: 1.8; letter-spacing: 1px; margin: 0 0 12px 0;">
-    【原文结尾金句】
-  </p>
-  <p style="font-size: 18px; font-weight: bold; color: #000000; line-height: 1.8; letter-spacing: 1px; margin: 0;">
-    【原文结尾金句】
-  </p>
-</div>
-\`\`\`
-
-## 2.12 文章结束标记
-
-\`\`\`html
-<p style="text-align: center; font-size: 18px; font-weight: bold; color: #000000; margin: 30px 0;">
-  END
-</p>
-\`\`\`
-
-## 2.13 CTA 转化区
-
-\`\`\`html
-<div style="margin: 30px 16px; padding: 20px 16px; background-color: #f8f8f8; border-radius: 8px; text-align: center;">
-  <p style="font-size: 18px; font-weight: bold; color: #000000; line-height: 1.8; margin: 0 0 8px 0;">
-    【原文 CTA 文案】
-  </p>
-  <div style="display: inline-block; font-size: 16px; font-weight: bold; color: #ffffff; background-color: #fa8c16; padding: 8px 24px; border-radius: 4px; letter-spacing: 1px; margin-bottom: 16px;">
-    【原文按钮文案】
-  </div>
-  <div style="text-align: center;">
-    <img src="https://example.com/qrcode.jpg" alt="二维码" style="width: 120px; height: 120px; border-radius: 4px;" />
-  </div>
-</div>
-\`\`\`
-
-## 2.14 作者名片
-
-\`\`\`html
-<div style="margin: 40px 16px 30px 16px; padding: 24px 16px; background-color: #f8f8f8; border-radius: 8px; text-align: center;">
-  <p style="font-size: 18px; font-weight: bold; color: #000000; line-height: 1.8; letter-spacing: 1px; margin: 0 0 16px 0;">
-    本文作者：粥左罗
-  </p>
-  <p style="font-size: 16px; color: #888888; line-height: 1.6; margin: 0 0 4px 0;">
-    90后，公众号「粥左罗」主理人
-  </p>
-  <p style="font-size: 16px; color: #888888; line-height: 1.6; margin: 0 0 4px 0;">
-    7本畅销书作者，110万粉丝
-  </p>
-  <p style="font-size: 16px; color: #888888; line-height: 1.6; margin: 0 0 16px 0;">
-    100篇10万+爆文，靠写作年入千万
-  </p>
-  <div style="display: inline-block; font-size: 16px; font-weight: bold; color: #ffffff; background-color: #fa8c16; padding: 8px 24px; border-radius: 4px; letter-spacing: 1px; margin-bottom: 16px;">
-    关注公众号「粥左罗」
-  </div>
-  <div style="text-align: center;">
-    <img src="https://example.com/qrcode.jpg" alt="公众号二维码" style="width: 120px; height: 120px; border-radius: 4px;" />
-    <p style="font-size: 15px; color: #888888; margin-top: 8px;">长按识别二维码，和我一起成长</p>
-  </div>
-</div>
-\`\`\`
-
----
-
-# 三、文章完整结构
-
-\`\`\`
-[期数标签] → 固定模板
-  ↓
-[分割线] → ---
-  ↓
-[作者信息] → 原文作者
-  ↓
-[来源信息] → 固定模板
-  ↓
-[转载授权] → 固定模板
-  ↓
-[正文开头] → 原文段落
-  ↓
-[模块1~N] → 编号 + 小标题 + 原文正文 + 原文加粗句 + 原文金句入底色块
-  ↓
-[结尾金句块] → 原文结尾核心金句
-  ↓
-[END 标记] → 固定模板
-  ↓
-[CTA 转化区] → 原文推广文案
-  ↓
-[分割线] → ---
-  ↓
-[作者名片] → 固定模板
-\`\`\`
-
----
-
-# 四、写作风格参考
-
-- **选题**：个人成长、认知升级、底层逻辑、思维模型
-- **语气**：坚定有力量感，短句为主，一句一段，口语化
-- **开头**：直接引入，不绕弯子
-- **正文**：每个模块 = 编号 + 小标题 + 正文，观点用故事/案例支撑，核心句加粗
-- **金句**：短小精练，朗朗上口，用重复、回环、类比、押韵
-- **结尾**：升华主题，给读者行动召唤
-- **字数**：2000-3000 字，4-5 个模块
-
----
-
-# 五、输出要求
-
-1. 输出纯 Markdown 源码，可直接粘贴到支持 HTML 渲染的 Markdown 编辑器
-2. 所有样式用内联 \`style=""\` 属性，不使用 CSS 类名、id、\`<style>\` 标签
-3. 正文每个段落为独立 \`<p>\` 标签，margin: 0 0 20px 0
-4. 加粗用 \`<strong style="color:#000000;">\`，不用 \`**\`
-5. 品牌色统一 #fa8c16，浅底色 #fdf6ec，正文灰 #3f3f3f
-6. 模块编号从 01 开始
-7. 图片 URL 用占位符 \`https://example.com/xxx.jpg\`
-8. 参数精确到像素
-9. 输出结果中不包含解释性文字，只输出文章源码`;
-
-// 通过临时 offscreen 元素执行 execCommand('paste')，不污染目标输入框
-function readClipboardViaTempElement(tag: 'textarea' | 'div'): string | null {
-    const el = document.createElement(tag);
-    if (tag === 'div') (el as HTMLDivElement).contentEditable = 'true';
-    Object.assign(el.style, {
-        position: 'fixed', left: '0', top: '0', opacity: '0',
-        pointerEvents: 'none', zIndex: '-1',
-    });
-    el.setAttribute('tabindex', '-1');
-    document.body.appendChild(el);
-    el.focus();
-
-    let text: string | null = null;
-    try {
-        if (document.execCommand('paste')) {
-            text = tag === 'textarea'
-                ? (el as HTMLTextAreaElement).value
-                : (el as HTMLDivElement).innerText;
-        }
-    } finally {
-        document.body.removeChild(el);
-    }
-    return text || null;
-}
-
-async function readClipboardText(): Promise<string | null> {
-    if (navigator.clipboard) {
-        try { return await navigator.clipboard.readText(); } catch { /* 降级 */ }
-        try {
-            const items = await navigator.clipboard.read();
-            for (const item of items) {
-                if (item.types.includes('text/plain')) {
-                    return await (await item.getType('text/plain')).text();
-                }
-            }
-        } catch { /* 降级 */ }
-    }
-    let text = readClipboardViaTempElement('textarea');
-    if (!text) text = readClipboardViaTempElement('div');
-    return text;
-}
-
-function decodeHtmlEntities(text: string) {
-    const textarea = document.createElement('textarea');
-    textarea.innerHTML = text;
-    return textarea.value;
-}
-
-function getTextOffsetFromPoint(root: HTMLElement, x: number, y: number) {
-    const doc = root.ownerDocument;
-    const pointDoc = doc as Document & {
-        caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
-        caretRangeFromPoint?: (x: number, y: number) => Range | null;
-    };
-    const caret = pointDoc.caretPositionFromPoint?.(x, y);
-    const range = caret ? doc.createRange() : pointDoc.caretRangeFromPoint?.(x, y);
-    if (!range) return root.textContent?.length ?? 0;
-    if (caret) {
-        range.setStart(caret.offsetNode, caret.offset);
-        range.collapse(true);
-    }
-    if (!root.contains(range.startContainer)) return root.textContent?.length ?? 0;
-
-    const before = doc.createRange();
-    before.selectNodeContents(root);
-    before.setEnd(range.startContainer, range.startOffset);
-    return before.toString().length;
-}
-
-function buildVisibleIndex(text: string, sourceMode = false) {
-    let value = '';
-    const positions = [0];
-    let atLineStart = true;
-    let inFence = false;
-
-    const push = (char: string, offset: number) => {
-        const next = /\s/.test(char) ? ' ' : char.toLowerCase();
-        if (next === ' ' && value.endsWith(' ')) return;
-        value += next;
-        positions.push(offset);
-    };
-
-    for (let i = 0; i < text.length; i += 1) {
-        const char = text[i];
-        const rest = text.slice(i);
-
-        if (sourceMode && atLineStart && /^(```|~~~)/.test(rest)) {
-            inFence = !inFence;
-            const end = text.indexOf('\n', i);
-            if (end === -1) break;
-            i = end;
-            atLineStart = true;
-            continue;
-        }
-
-        if (sourceMode && !inFence) {
-            if (char === '<') {
-                const end = text.indexOf('>', i + 1);
-                if (end !== -1) {
-                    i = end;
-                    continue;
-                }
-            }
-            if (char === '\\' && text[i + 1]) continue;
-            if (atLineStart) {
-                const match = rest.match(/^(\s{0,3}(?:#{1,6}|>|[-*+]|\d+[.)])\s+)/);
-                if (match) {
-                    i += match[1].length - 1;
-                    atLineStart = false;
-                    continue;
-                }
-            }
-            if (char === ']' && text[i + 1] === '(') {
-                const end = text.indexOf(')', i + 2);
-                if (end !== -1) {
-                    i = end;
-                    continue;
-                }
-            }
-            if ('#*_~`[]'.includes(char)) {
-                atLineStart = false;
-                continue;
-            }
-        }
-
-        push(char, i + 1);
-        atLineStart = char === '\n';
-    }
-
-    return { value: value.trimEnd(), positions };
-}
-
-function getVisiblePosition(text: string, rawOffset: number) {
-    return buildVisibleIndex(text.slice(0, rawOffset)).value.length;
-}
-
-function mapRenderedPointToSource(root: HTMLElement, markdown: string, x: number, y: number) {
-    const renderedText = root.textContent ?? '';
-    const renderedOffset = getTextOffsetFromPoint(root, x, y);
-    const renderedIndex = buildVisibleIndex(renderedText);
-    const sourceIndex = buildVisibleIndex(markdown, true);
-    const renderedPosition = getVisiblePosition(renderedText, renderedOffset);
-    if (!renderedIndex.value || !sourceIndex.value) return markdown.length;
-
-    for (const radius of [28, 20, 14, 9, 5]) {
-        let start = Math.max(0, renderedPosition - radius);
-        let end = Math.min(renderedIndex.value.length, renderedPosition + radius);
-        while (start < renderedPosition && renderedIndex.value[start] === ' ') start += 1;
-        while (end > renderedPosition && renderedIndex.value[end - 1] === ' ') end -= 1;
-        const needle = renderedIndex.value.slice(start, end);
-        if (needle.length < 2) continue;
-
-        const matches: number[] = [];
-        for (let index = sourceIndex.value.indexOf(needle); index !== -1; index = sourceIndex.value.indexOf(needle, index + 1)) {
-            matches.push(index);
-        }
-        if (!matches.length) continue;
-
-        const caretInNeedle = Math.max(0, renderedPosition - start);
-        const expected = Math.round((renderedPosition / renderedIndex.value.length) * sourceIndex.value.length);
-        const match = matches.reduce((best, current) =>
-            Math.abs(current + caretInNeedle - expected) < Math.abs(best + caretInNeedle - expected) ? current : best
-        );
-        return sourceIndex.positions[Math.min(match + caretInNeedle, sourceIndex.positions.length - 1)] ?? markdown.length;
-    }
-
-    const fallback = Math.round((renderedPosition / renderedIndex.value.length) * sourceIndex.value.length);
-    return sourceIndex.positions[Math.min(fallback, sourceIndex.positions.length - 1)] ?? markdown.length;
-}
-
-function removeMarkdownFormatting(markdown: string) {
-    let text = markdown.replace(/\r\n?/g, '\n');
-
-    text = text.replace(/```[^\n]*\n([\s\S]*?)\n?```/g, '$1');
-    text = text.replace(/~~~[^\n]*\n([\s\S]*?)\n?~~~/g, '$1');
-    text = text.replace(/^\s{0,3}#{1,6}\s+/gm, '');
-    text = text.replace(/^\s{0,3}>\s?/gm, '');
-    text = text.replace(/^\s{0,3}(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/gm, '');
-    text = text.replace(/^\s{0,3}[-*_]{3,}\s*$/gm, '');
-    text = text.replace(/^\s*\|?[\s:-]{3,}\|[\s|:-]*$/gm, '');
-    text = text.replace(/^\s*\|(.+)\|\s*$/gm, (_, cells: string) => cells.split('|').map(cell => cell.trim()).filter(Boolean).join('  '));
-    text = text.replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1');
-    text = text.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
-    text = text.replace(/\[([^\]]+)\]\[[^\]]*\]/g, '$1');
-    text = text.replace(/^\s{0,3}\[[^\]]+\]:\s+\S+.*$/gm, '');
-    text = text.replace(/`{1,3}([^`]+)`{1,3}/g, '$1');
-    text = text.replace(/~~([^~]+)~~/g, '$1');
-
-    for (let i = 0; i < 3; i += 1) {
-        text = text
-            .replace(/(\*\*\*|___)(.*?)\1/g, '$2')
-            .replace(/(\*\*|__)(.*?)\1/g, '$2')
-            .replace(/(^|[^\w])([*_])([^*_]+)\2(?=[^\w]|$)/g, '$1$3');
-    }
-
-    text = text
-        .replace(/<br\s*\/?>/gi, '\n')
-        .replace(/<\/?(?:p|div|h[1-6]|li|blockquote|section|article|header|footer|aside|main|nav|pre|code|table|tr|td|th|thead|tbody|tfoot|ul|ol|dl|dt|dd|figure|figcaption|details|summary)[^>]*>/gi, '\n')
-        .replace(/<[^>]+>/g, '');
-
-    text = decodeHtmlEntities(text);
-
-    text = text.replace(/\[\/?(?:b|i|u|s|strike|del|ins|em|strong|code|pre|quote|color|size|font|url|img|email|list|ul|ol|li|table|tr|td|th|align|center|left|right|justify|indent|sub|sup|spoiler|php|html|youtube|media)(?:=[^\]]*)?\]/gi, '');
-
-    text = text.replace(
-        // eslint-disable-next-line no-control-regex
-        /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u00AD\u0600-\u0605\u061C\u06DD\u070F\u08E2\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\uFEFF\uFFF9-\uFFFB]|\uD834[\uDD73-\uDD7A]|\uDB40[\uDC01-\uDC7F]/g,
-        ''
-    );
-
-    text = text.replace(
-        /[\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000\uFEFF]/g,
-        ' '
-    );
-
-    text = text.replace(
-        // eslint-disable-next-line no-misleading-character-class
-        /[\p{Emoji}\p{Emoji_Presentation}\p{Extended_Pictographic}\p{Emoji_Modifier_Base}\p{Emoji_Modifier}\p{Emoji_Component}\u{FE0F}\u{200D}\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{1F300}-\u{1FAFF}\u{2300}-\u{23FF}\u{2B00}-\u{2BFF}\u{2190}-\u{21FF}\u{2200}-\u{22FF}\u{25A0}-\u{25FF}\u{2700}-\u{27BF}\u{2900}-\u{297F}\u{2B00}-\u{2BFF}]/gu,
-        ''
-    );
-
-    text = text.replace(
-        // eslint-disable-next-line no-useless-escape
-        /(?:[:;=8xX><][\-o\*'"]?[\)\]\(\[dDpP/\\:@|3}><{oO0\*vV]|[\)\]\(\[dDpP/\\:@|3}><{oO0\*vV][\-o\*'"]?[:;=8xX><]|<\/?3|:\*|:-[\/\\]|:\(|\^_\^|\^-\^|T_T|T\.T|-_-|\.-\)|:-[)D]|:-\(|:'-\(|XD|xD|XP|xp|O\.o|o\.O|:3|=\)|=\(|OwO|owo|UwU|uwu|QwQ|qwq|QAQ|qaq)/g,
-        ''
-    );
-
-    text = text.replace(
-        /(?:https?:\/\/|www\.)[^\s<>")\]]+/gi,
-        ''
-    );
-
-    text = text.replace(/�/g, '');
-
-    return text
-        .replace(/[ \t]+\n/g, '\n')
-        .replace(/\n{3,}/g, '\n\n')
-        .replace(/[^\S\n]{2,}/g, ' ')
-        .replace(/^[ \t]+|[ \t]+$/gm, '')
-        .trim();
-}
 
 const OFFICIAL_MODEL_ICON_PATHS = {
     openai: 'M249.176 323.434V298.276C249.176 296.158 249.971 294.569 251.825 293.509L302.406 264.381C309.29 260.409 317.5 258.555 325.973 258.555C357.75 258.555 377.877 283.185 377.877 309.399C377.877 311.253 377.877 313.371 377.611 315.49L325.178 284.771C322.001 282.919 318.822 282.919 315.645 284.771L249.176 323.434ZM367.283 421.415V361.301C367.283 357.592 365.694 354.945 362.516 353.092L296.048 314.43L317.763 301.982C319.617 300.925 321.206 300.925 323.058 301.982L373.639 331.112C388.205 339.586 398.003 357.592 398.003 375.069C398.003 395.195 386.087 413.733 367.283 421.412V421.415ZM233.553 368.452L211.838 355.742C209.986 354.684 209.19 353.095 209.19 350.975V292.718C209.19 264.383 230.905 242.932 260.301 242.932C271.423 242.932 281.748 246.641 290.49 253.26L238.321 283.449C235.146 285.303 233.555 287.951 233.555 291.659V368.455L233.553 368.452ZM280.292 395.462L249.176 377.985V340.913L280.292 323.436L311.407 340.913V377.985L280.292 395.462ZM300.286 475.968C289.163 475.968 278.837 472.259 270.097 465.64L322.264 435.449C325.441 433.597 327.03 430.949 327.03 427.239V350.445L349.011 363.155C350.865 364.213 351.66 365.802 351.66 367.922V426.179C351.66 454.514 329.679 475.965 300.286 475.965V475.968ZM237.525 416.915L186.944 387.785C172.378 379.31 162.582 361.305 162.582 343.827C162.582 323.436 174.763 305.164 193.563 297.485V357.861C193.563 361.571 195.154 364.217 198.33 366.071L264.535 404.467L242.82 416.915C240.967 417.972 239.377 417.972 237.525 416.915ZM234.614 460.343C204.689 460.343 182.71 437.833 182.71 410.028C182.71 407.91 182.976 405.792 183.238 403.672L235.405 433.863C238.582 435.715 241.763 435.715 244.938 433.863L311.407 395.466V420.622C311.407 422.742 310.612 424.331 308.758 425.389L258.179 454.519C251.293 458.491 243.083 460.343 234.611 460.343H234.614ZM300.286 491.854C332.329 491.854 359.073 469.082 365.167 438.892C394.825 431.211 413.892 403.406 413.892 375.073C413.892 356.535 405.948 338.529 391.648 325.552C392.972 319.991 393.766 314.43 393.766 308.87C393.766 271.003 363.048 242.666 327.562 242.666C320.413 242.666 313.528 243.723 306.644 246.109C294.725 234.457 278.307 227.042 260.301 227.042C228.258 227.042 201.513 249.815 195.42 280.004C165.761 287.685 146.694 315.49 146.694 343.824C146.694 362.362 154.638 380.368 168.938 393.344C167.613 398.906 166.819 404.467 166.819 410.027C166.819 447.894 197.538 476.231 233.024 476.231C240.172 476.231 247.058 475.173 253.943 472.788C265.859 484.441 282.278 491.854 300.286 491.854Z',
@@ -689,6 +131,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
     const [isLoadingModels, setIsLoadingModels] = useState(false);
     const [sheetHeight, setSheetHeight] = useState(88);
     const [isFullscreen, setIsFullscreen] = useState(false);
+    const [isDragging, setIsDragging] = useState(false);
     const [modeDrag, setModeDrag] = useState(0);
     const [isModeDragging, setIsModeDragging] = useState(false);
     const [isPromptRendered, setIsPromptRendered] = useState(false);
@@ -883,38 +326,31 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
         event.preventDefault();
         const startY = event.clientY;
         const startHeight = sheetHeight;
-        let velocity = 0;
+        const vh = window.innerHeight;
         let lastY = startY;
         let lastTime = Date.now();
         let shouldExpand = false;
         let currentHeight = startHeight;
+        setIsDragging(true);
 
-        const onMove = (moveEvent: PointerEvent) => {
+        const onMove = (e: PointerEvent) => {
             const now = Date.now();
-            const dt = Math.max(1, now - lastTime);
-            const dy = lastY - moveEvent.clientY;
-            velocity = dy / dt;
-
-            lastY = moveEvent.clientY;
+            const dy = lastY - e.clientY;
+            lastY = e.clientY;
             lastTime = now;
 
-            const deltaY = startY - moveEvent.clientY;
-            const next = startHeight + (deltaY / window.innerHeight) * 100;
-            currentHeight = Math.max(50, Math.min(94, next));
-
-            if (currentHeight >= 90 || (velocity > 0.5 && currentHeight >= 85)) {
+            currentHeight = Math.max(50, Math.min(94, startHeight + ((startY - e.clientY) / vh) * 100));
+            if (currentHeight >= 90 || (dy / Math.max(1, now - lastTime) > 0.5 && currentHeight >= 85)) {
                 shouldExpand = true;
             }
-
             setSheetHeight(currentHeight);
         };
         const onUp = () => {
             window.removeEventListener('pointermove', onMove);
             window.removeEventListener('pointerup', onUp);
             window.removeEventListener('pointercancel', onUp);
-            if (shouldExpand || currentHeight >= 90) {
-                setIsFullscreen(true);
-            }
+            setIsDragging(false);
+            if (shouldExpand || currentHeight >= 90) setIsFullscreen(true);
         };
 
         window.addEventListener('pointermove', onMove);
@@ -1431,7 +867,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                         onClick={stopGenerating}
                         aria-label="打断输出"
                         data-tooltip="打断输出"
-                        className={`inline-flex items-center justify-center rounded-md bg-[#1d1d1f] text-white transition-colors hover:bg-[#2f3137] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 dark:bg-[#f5f5f7] ${compact ? 'h-[clamp(22px,calc(var(--sh)*0.055),44px)] w-[clamp(22px,calc(var(--sh)*0.055),44px)]' : 'h-8 w-8'}`}
+                        className={`inline-flex items-center justify-center rounded-md bg-[#1d1d1f] text-white transition-colors hover:bg-[#2f3137] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 dark:bg-[#f5f5f7] ${compact ? 'h-[clamp(20px,calc(var(--sh)*0.03),28px)] w-[clamp(20px,calc(var(--sh)*0.03),28px)]' : 'h-8 w-8'}`}
                     >
                         <span className="h-2.5 w-2.5 rounded-[2px] bg-white dark:bg-black" />
                     </button>
@@ -1851,19 +1287,21 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                                 borderTopRightRadius: isFullscreen ? 0 : 14,
                             }}
                             exit={{ opacity: 0, y: '100%' }}
-                            transition={isFullscreen
-                                ? {
-                                    duration: prefersReducedMotion ? 0.1 : 0.4,
-                                    ease: [0.32, 0.72, 0, 1],
-                                    height: { duration: prefersReducedMotion ? 0.1 : 0.4, ease: [0.32, 0.72, 0, 1] },
-                                    borderTopLeftRadius: { duration: prefersReducedMotion ? 0.1 : 0.3, ease: 'easeOut' },
-                                    borderTopRightRadius: { duration: prefersReducedMotion ? 0.1 : 0.3, ease: 'easeOut' },
-                                }
-                                : { duration: prefersReducedMotion ? 0.05 : 0.12, ease: [0.25, 0.1, 0.25, 1] }
+                            transition={isDragging
+                                ? { duration: 0 }
+                                : isFullscreen
+                                    ? {
+                                        duration: prefersReducedMotion ? 0.1 : 0.4,
+                                        ease: [0.32, 0.72, 0, 1],
+                                        height: { duration: prefersReducedMotion ? 0.1 : 0.4, ease: [0.32, 0.72, 0, 1] },
+                                        borderTopLeftRadius: { duration: prefersReducedMotion ? 0.1 : 0.3, ease: 'easeOut' },
+                                        borderTopRightRadius: { duration: prefersReducedMotion ? 0.1 : 0.3, ease: 'easeOut' },
+                                    }
+                                    : { duration: prefersReducedMotion ? 0.05 : 0.12, ease: [0.25, 0.1, 0.25, 1] }
                             }
                             className={`fixed z-[201] grid overflow-hidden bg-[#fbfcfe] shadow-[0_-22px_64px_rgba(15,23,42,0.2)] dark:bg-[#1c1c1e] will-change-transform`}
                             style={{
-                                gridTemplateRows: 'auto minmax(0, 1fr) minmax(26px, 0.1fr)',
+                                gridTemplateRows: 'auto minmax(0, 1fr) auto',
                                 '--sh': isFullscreen ? '100vh' : `${sheetHeight}vh`,
                             } as React.CSSProperties}
                         >
@@ -1891,7 +1329,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                                 {mobileInputPane}
                                 {showOutput && renderOutputPane()}
                             </main>
-                            <footer className={`flex h-full min-h-0 items-center justify-end gap-[clamp(3px,calc(var(--sh)*0.012),10px)] bg-[#fbfcfe]/96 px-[clamp(10px,calc(var(--sh)*0.02),16px)] py-[clamp(3px,calc(var(--sh)*0.015),12px)] shadow-[0_-14px_26px_rgba(15,23,42,0.06)] backdrop-blur dark:bg-[#1c1c1e]/95 dark:shadow-[0_-14px_26px_rgba(0,0,0,0.18)] ${isFullscreen ? 'pb-[max(env(safe-area-inset-bottom),16px)]' : ''}`}>
+                            <footer className={`flex items-center justify-end gap-[clamp(2px,calc(var(--sh)*0.006),6px)] bg-[#fbfcfe]/96 px-[clamp(8px,calc(var(--sh)*0.012),12px)] py-[clamp(2px,calc(var(--sh)*0.006),6px)] shadow-[0_-14px_26px_rgba(15,23,42,0.06)] backdrop-blur dark:bg-[#1c1c1e]/95 dark:shadow-[0_-14px_26px_rgba(0,0,0,0.18)] ${isFullscreen ? 'pb-[max(env(safe-area-inset-bottom),3px)]' : ''}`}>
                                 {renderActions({ compact: true })}
                             </footer>
                         </motion.div>

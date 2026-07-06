@@ -5,7 +5,7 @@ export const DEVICE_FRAME_SIZE = {
     tablet: { width: 744, height: 1133 },
 } as const;
 
-export type DeviceFrameMode = keyof typeof DEVICE_FRAME_SIZE;
+type DeviceFrameMode = keyof typeof DEVICE_FRAME_SIZE;
 
 export const DEVICE_FRAME_PADDING: Record<DeviceFrameMode, number> = {
     mobile: 8,

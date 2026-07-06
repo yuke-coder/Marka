@@ -6,7 +6,7 @@ import { extraThemes } from './extra';
 export type { Theme };
 export const THEMES: Theme[] = [...classicThemes, ...modernThemes, ...extraThemes];
 
-export interface ThemeGroup {
+interface ThemeGroup {
   label: string;
   themes: Theme[];
 }
