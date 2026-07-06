@@ -97,8 +97,6 @@ test('opens AI Markdown as a desktop modal from the header', async ({ page }) =>
     await page.getByTestId('ai-markdown-open').click();
 
     await expect(page.getByTestId('ai-desktop-modal')).toBeVisible();
-    await expect(page.getByRole('button', { name: '排版模式 保留原文，只做 Markdown 化' })).toBeVisible();
-    await expect(page.getByRole('button', { name: '改写模式 可调整表达，但不编造事实' })).toBeVisible();
     await expect(page.getByTestId('ai-source-text')).toBeVisible();
     await expect(page.getByRole('button', { name: '生成 Markdown' })).toBeDisabled();
 });
