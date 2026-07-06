@@ -17,7 +17,7 @@ interface AiMarkdownBody {
 const PROVIDERS = {
     openai: { apiKeyEnvs: ['OPENAI_API_KEY'], apiUrl: 'https://api.openai.com/v1/responses', modelsUrl: 'https://api.openai.com/v1/models', label: 'OpenAI' },
     deepseek: { apiKeyEnvs: ['DEEPSEEK_API_KEY'], apiUrl: 'https://api.deepseek.com/chat/completions', modelsUrl: 'https://api.deepseek.com/models', label: 'DeepSeek' },
-    doubao: { apiKeyEnvs: ['ARK_API_KEY', 'DOUBAO_API_KEY', 'VOLCENGINE_API_KEY'], apiUrl: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions', label: 'Doubao' },
+    doubao: { apiKeyEnvs: ['ARK_API_KEY', 'DOUBAO_API_KEY', 'VOLCENGINE_API_KEY'], apiUrl: 'https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions', modelsUrl: 'https://ark.cn-beijing.volces.com/api/coding/v3/models', label: 'Doubao' },
 } as const;
 type AiProvider = keyof typeof PROVIDERS;
 
@@ -37,7 +37,7 @@ const SELECTABLE_REASONING_EFFORTS: Set<string> = new Set(['low', 'medium', 'hig
 const SELECTABLE_SPEEDS: Set<string> = new Set(['standard', 'fast']);
 const MODELS_CACHE_MS = 5 * 60 * 1000;
 const MODEL_ENV_KEYS = ['AI_MARKDOWN_MODEL', 'DOUBAO_MODEL', 'ARK_MODEL', 'OPENAI_MODEL', 'DEEPSEEK_MODEL'];
-type ModelOption = { id: string; label: string };
+type ModelOption = { id: string; label: string; provider: AiProvider };
 
 let proxyReady = false;
 let availableModelsCache: { expiresAt: number; models: ModelOption[] } | null = null;
@@ -67,18 +67,23 @@ function getApiKeyEnvLabel(provider: AiProvider) {
     return PROVIDERS[provider].apiKeyEnvs.join(' 或 ');
 }
 
-function getModelOption(id: string) {
+function getStaticModelOption(id: string) {
     return MODEL_OPTIONS.find(option => option.id === id);
 }
 
-async function readAvailableModelIds(provider: AiProvider) {
+function getModelOption(id: string, models?: ModelOption[] | null) {
+    return models?.find(option => option.id === id) ?? getStaticModelOption(id);
+}
+
+function toModelOption(provider: AiProvider, id: string): ModelOption {
+    return { id, label: getStaticModelOption(id)?.label ?? id, provider };
+}
+
+async function readAvailableModels(provider: AiProvider) {
     setupProxy();
     const config = PROVIDERS[provider];
     const apiKey = getApiKey(provider);
-    if (!apiKey) return new Set<string>();
-    if (!('modelsUrl' in config)) {
-        return new Set(MODEL_OPTIONS.filter(option => option.provider === provider).map(option => option.id));
-    }
+    if (!apiKey) return [];
 
     const response = await fetch(config.modelsUrl, {
         headers: { Authorization: `Bearer ${apiKey}` },
@@ -87,30 +92,42 @@ async function readAvailableModelIds(provider: AiProvider) {
     if (!response.ok) throw new Error(`${config.label} models request failed: ${response.status}`);
 
     const data = await response.json();
-    return new Set<string>(
-        Array.isArray(data?.data)
-            ? data.data.map((model: { id?: unknown }) => model.id).filter((id: unknown): id is string => typeof id === 'string')
-            : []
-    );
+    return Array.isArray(data?.data)
+        ? data.data
+            .map((model: { id?: unknown }) => model.id)
+            .filter((id: unknown): id is string => typeof id === 'string' && id.trim().length > 0)
+            .map((id: string) => toModelOption(provider, id.trim()))
+        : [];
 }
 
 async function getAvailableModels() {
     const now = Date.now();
     if (availableModelsCache && availableModelsCache.expiresAt > now) return availableModelsCache.models;
 
-    const idsByProvider = new Map<AiProvider, Set<string>>();
-    await Promise.all((Object.keys(PROVIDERS) as AiProvider[]).map(async provider => {
+    const providerModels = await Promise.all((Object.keys(PROVIDERS) as AiProvider[]).map(async provider => {
         try {
-            idsByProvider.set(provider, await readAvailableModelIds(provider));
+            return await readAvailableModels(provider);
         } catch (err) {
             console.error(`${PROVIDERS[provider].label} models request failed:`, err);
-            idsByProvider.set(provider, new Set());
+            return [];
         }
     }));
 
-    const models = MODEL_OPTIONS
-        .filter(option => idsByProvider.get(option.provider)?.has(option.id))
-        .map(({ id, label }) => ({ id, label }));
+    const staticOrder = new Map(MODEL_OPTIONS.map((option, index) => [option.id, index]));
+    const seen = new Set<string>();
+    const models = providerModels
+        .flat()
+        .filter(option => {
+            if (seen.has(option.id)) return false;
+            seen.add(option.id);
+            return true;
+        })
+        .sort((a, b) =>
+            (a.id === DEFAULT_MODEL ? -1 : b.id === DEFAULT_MODEL ? 1 : 0)
+            || ((staticOrder.get(a.id) ?? 10_000) - (staticOrder.get(b.id) ?? 10_000))
+            || a.provider.localeCompare(b.provider)
+            || a.id.localeCompare(b.id)
+        );
 
     availableModelsCache = { expiresAt: now + MODELS_CACHE_MS, models };
     return models;
@@ -307,11 +324,6 @@ export async function handleAiMarkdownRequest(req: IncomingMessage, res: ServerR
     const sourceText = (body.sourceText || '').trim();
     const extraInstruction = body.extraInstruction || '';
 
-    if (requestedModel && !getModelOption(requestedModel)) {
-        sendJson(res, 400, { error: '请选择有效的模型' });
-        return;
-    }
-
     if (requestedReasoningEffort && !SELECTABLE_REASONING_EFFORTS.has(requestedReasoningEffort)) {
         sendJson(res, 400, { error: '请选择有效的推理等级' });
         return;
@@ -347,12 +359,12 @@ export async function handleAiMarkdownRequest(req: IncomingMessage, res: ServerR
 
     const configuredModel = MODEL_ENV_KEYS
         .map(readEnv)
-        .find(id => getModelOption(id) && (!availableModels || availableModelIds.has(id)));
+        .find(id => getModelOption(id, availableModels) && (!availableModels || availableModelIds.has(id)));
     const model = requestedModel
         || configuredModel
         || availableModels?.[0]?.id
         || DEFAULT_MODEL;
-    const modelOption = getModelOption(model);
+    const modelOption = getModelOption(model, availableModels);
     if (!modelOption) {
         sendJson(res, 400, { error: '请选择有效的模型' });
         return;

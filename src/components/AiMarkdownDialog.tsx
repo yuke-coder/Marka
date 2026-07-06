@@ -644,8 +644,14 @@ const DOUBAO_ICON_PATHS: Array<{ d: string; opacity?: string }> = [
 ];
 
 function ModelIcon({ modelId }: { modelId: AiMarkdownModel }) {
-    const isDeepSeek = modelId.startsWith('deepseek-');
-    const isDoubao = modelId.startsWith('ark-') || modelId.toLowerCase().includes('doubao');
+    const id = modelId.toLowerCase();
+    const isOpenAI = /^(gpt-|o\d|chatgpt)/.test(id);
+    const isDeepSeek = id.startsWith('deepseek-');
+    const isDoubao = id.startsWith('doubao-') || id.startsWith('ark-');
+
+    if (!isOpenAI && !isDeepSeek && !isDoubao) {
+        return <span className="h-4 w-4 shrink-0" aria-hidden="true" />;
+    }
 
     return (
         <span className="flex h-4 w-4 shrink-0 items-center justify-center text-[#5f6672] dark:text-[#d8d8dc]" aria-hidden="true">
