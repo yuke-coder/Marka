@@ -195,14 +195,24 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
         if (isDesktop || !isOpen) return;
         const vv = window.visualViewport;
         if (!vv) return;
+        let rafId: number | null = null;
+        let lastKb = 0;
         const update = () => {
-            const kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
-            setKeyboardHeight(kb);
+            if (rafId !== null) return;
+            rafId = requestAnimationFrame(() => {
+                rafId = null;
+                const kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+                if (kb !== lastKb) {
+                    lastKb = kb;
+                    setKeyboardHeight(kb);
+                }
+            });
         };
         update();
         vv.addEventListener('resize', update);
         vv.addEventListener('scroll', update);
         return () => {
+            if (rafId !== null) cancelAnimationFrame(rafId);
             vv.removeEventListener('resize', update);
             vv.removeEventListener('scroll', update);
         };
@@ -576,50 +586,29 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
         setSettingsSubmenuOffset(Math.max(minOffset, Math.min(preferredOffset, maxOffset)));
     };
 
-    const changeReasoningEffort = (next: AiReasoningEffort) => {
-        const item = aiReasoningEfforts.find(option => option.id === next);
+    const selectSetting = <T extends { id: string; label: string }>(
+        options: T[],
+        currentId: T['id'],
+        set: (id: T['id']) => void,
+        name: string
+    ) => (nextId: T['id']) => {
+        const item = options.find(option => option.id === nextId);
         if (!item) {
-            showNotice('修改失败', '未找到对应的推理等级', 'error');
+            showNotice('修改失败', `未找到对应的${name}配置`, 'error');
             return;
         }
-        if (reasoningEffort === item.id) {
+        if (currentId === item.id) {
             closeSettingsMenu();
             return;
         }
-        setReasoningEffort(item.id);
+        set(item.id);
         closeSettingsMenu();
-        showNotice('修改成功', `推理等级已切换为 ${item.label}`, 'success');
+        showNotice('修改成功', `${name}已切换为 ${item.label}`, 'success');
     };
 
-    const changeModel = (next: AiMarkdownModel) => {
-        const item = modelOptions.find(option => option.id === next);
-        if (!item) {
-            showNotice('修改失败', '未找到对应的模型配置', 'error');
-            return;
-        }
-        if (model === item.id) {
-            closeSettingsMenu();
-            return;
-        }
-        setModel(item.id);
-        closeSettingsMenu();
-        showNotice('修改成功', `模型已切换为 ${item.label}`, 'success');
-    };
-
-    const changeSpeed = (next: AiMarkdownSpeed) => {
-        const item = aiMarkdownSpeeds.find(option => option.id === next);
-        if (!item) {
-            showNotice('修改失败', '未找到对应的速度配置', 'error');
-            return;
-        }
-        if (speed === item.id) {
-            closeSettingsMenu();
-            return;
-        }
-        setSpeed(item.id);
-        closeSettingsMenu();
-        showNotice('修改成功', `速度已切换为 ${item.label}`, 'success');
-    };
+    const changeReasoningEffort = selectSetting(aiReasoningEfforts, reasoningEffort, setReasoningEffort, '推理等级');
+    const changeModel = selectSetting(modelOptions, model, setModel, '模型');
+    const changeSpeed = selectSetting(aiMarkdownSpeeds, speed, setSpeed, '速度');
 
     const handlePromptOverlayPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
         if (isGenerating || event.button !== 0) return;
@@ -896,200 +885,111 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
         );
     };
 
-    const inputPane = (
-        <section className="flex min-h-0 flex-col gap-3">
-            <div className="shrink-0">{renderModeSwitch()}</div>
-            <div className="flex min-h-0 flex-[1.6] flex-col">
-                <div className="mb-2 flex items-center justify-between gap-2">
-                    <span className="flex items-center gap-1">
-                        <span className={labelClass}>纯文本内容</span>
-                        <button
-                            type="button"
-                            aria-label="复制纯文本内容"
-                            disabled={copiedFields.source || !hasSourceText}
-                            onClick={() => void copyField('source', sourceTextareaRef.current?.value ?? sourceTextRef.current)}
-                            className={iconButton}
-                        >
-                            {copiedFields.source ? <Check size={11} className="text-[#008847] dark:text-[#5de086]" /> : <Copy size={11} />}
-                        </button>
-                        <span ref={sourceLengthRef} className="text-[11px] text-[#86868b] dark:text-[#8e8e93]">{sourceTextRef.current.length} 字</span>
-                    </span>
-                    {hasSourceText && (
-                        <span className="flex items-center gap-1.5">
-                            <button type="button" onClick={() => void pasteSourceText()} disabled={isGenerating} className={desktopFieldButton}>
-                                <Clipboard size={11} />
-                                粘贴
-                            </button>
-                            <button type="button" onClick={clearSourceFormatting} disabled={isGenerating} className={desktopFieldButton}>
-                                <RemoveFormatting size={11} />
-                                清除格式
-                            </button>
-                            <button type="button" onClick={clearSourceText} disabled={isGenerating} className={desktopFieldButton}>
-                                <Eraser size={11} />
-                                清除
-                            </button>
-                        </span>
-                    )}
-                </div>
-                <div className="relative flex min-h-0 flex-1">
-                    <textarea
-                        ref={sourceTextareaRef}
-                        data-testid="ai-source-text"
-                        aria-label="纯文本内容"
-                        defaultValue={sourceTextRef.current}
-                        onInput={(e) => syncSourceText(e.currentTarget.value)}
-                        className={`${fieldClass} h-full min-h-[360px] flex-1`}
-                        disabled={isGenerating}
-                    />
-                    {!hasSourceText && (
-                        <button
-                            type="button"
-                            onClick={() => void pasteSourceText()}
-                            disabled={isGenerating}
-                            className={`absolute left-3 top-2.5 z-10 ${desktopFieldButton}`}
-                        >
-                            <Clipboard size={11} />
-                            粘贴
-                        </button>
-                    )}
-                </div>
-            </div>
-
-            <div className="flex min-h-0 flex-[1.1] flex-col">
-                <div className="mb-2 flex items-center justify-between gap-2">
-                    <span className="flex items-center gap-1">
-                        <span className={labelClass}>Prompt</span>
-                        <button
-                            type="button"
-                            aria-label="复制 Prompt"
-                            disabled={copiedFields.extra || !extraInstruction}
-                            onClick={() => void copyField('extra', extraInstruction)}
-                            className={iconButton}
-                        >
-                            {copiedFields.extra ? <Check size={11} className="text-[#008847] dark:text-[#5de086]" /> : <Copy size={11} />}
-                        </button>
-                        <span className="text-[11px] text-[#86868b] dark:text-[#8e8e93]">{extraInstruction.length} 字</span>
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                        <button type="button" onClick={() => void pasteExtraInstruction()} disabled={isGenerating} className={desktopFieldButton}>
-                            <Clipboard size={11} />
-                            粘贴
-                        </button>
-                        {extraInstruction && (
-                            <>
-                                <button type="button" onClick={clearExtraFormatting} disabled={isGenerating} className={desktopFieldButton}>
-                                    <RemoveFormatting size={11} />
-                                    清除格式
-                                </button>
-                                <button type="button" onClick={clearExtraInstruction} disabled={isGenerating} className={desktopFieldButton}>
-                                    <Eraser size={11} />
-                                    清除
-                                </button>
-                            </>
-                        )}
-                    </span>
-                </div>
-                {renderPromptField(false)}
-            </div>
-        </section>
-    );
-
-    const mobileInputPane = (
-        <section className="flex min-h-0 flex-1 flex-col gap-3" style={{ minHeight: '260px' }}>
-            <div className="flex min-h-0 flex-[2] flex-col">
-                <div className="mb-2 flex shrink-0 items-center justify-between gap-2">
-                    <span className="flex items-center gap-1">
-                        <span className={labelClass}>纯文本内容</span>
-                        <button
-                            type="button"
-                            aria-label="复制纯文本内容"
-                            disabled={copiedFields.source || !hasSourceText}
-                            onClick={() => void copyField('source', sourceTextareaRef.current?.value ?? sourceTextRef.current)}
-                            className={iconButton}
-                        >
-                            {copiedFields.source ? <Check size={11} className="text-[#008847] dark:text-[#5de086]" /> : <Copy size={11} />}
-                        </button>
-                        <span ref={sourceLengthRef} className="text-[11px] text-[#86868b] dark:text-[#8e8e93]">{sourceTextRef.current.length} 字</span>
-                    </span>
-                    {hasSourceText && (
+    const renderInputPane = (mobile: boolean) => {
+        const fb = mobile ? compactFieldButton : desktopFieldButton;
+        const btnGap = mobile ? 'gap-1' : 'gap-1.5';
+        const headerCls = `mb-2 flex ${mobile ? 'shrink-0 ' : ''}items-center justify-between gap-2`;
+        return (
+            <section
+                className={`flex min-h-0 ${mobile ? 'flex-1 ' : ''}flex-col gap-3`}
+                style={mobile ? { minHeight: '260px' } : undefined}
+            >
+                {!mobile && <div className="shrink-0">{renderModeSwitch()}</div>}
+                <div className={`flex min-h-0 ${mobile ? 'flex-[2]' : 'flex-[1.6]'} flex-col`}>
+                    <div className={headerCls}>
                         <span className="flex items-center gap-1">
-                            <button type="button" onClick={() => void pasteSourceText()} disabled={isGenerating} className={compactFieldButton}>
-                                <Clipboard size={11} />
-                                粘贴
+                            <span className={labelClass}>纯文本内容</span>
+                            <button
+                                type="button"
+                                aria-label="复制纯文本内容"
+                                disabled={copiedFields.source || !hasSourceText}
+                                onClick={() => void copyField('source', sourceTextareaRef.current?.value ?? sourceTextRef.current)}
+                                className={iconButton}
+                            >
+                                {copiedFields.source ? <Check size={11} className="text-[#008847] dark:text-[#5de086]" /> : <Copy size={11} />}
                             </button>
-                            <button type="button" onClick={clearSourceFormatting} disabled={isGenerating} className={compactFieldButton}>
-                                <RemoveFormatting size={11} />
-                                清除格式
-                            </button>
-                            <button type="button" onClick={clearSourceText} disabled={isGenerating} className={compactFieldButton}>
-                                <Eraser size={11} />
-                                清除
-                            </button>
+                            <span ref={sourceLengthRef} className="text-[11px] text-[#86868b] dark:text-[#8e8e93]">{sourceTextRef.current.length} 字</span>
                         </span>
-                    )}
-                </div>
-                <div className="relative flex min-h-0 flex-1">
-                    <textarea
-                        ref={sourceTextareaRef}
-                        data-testid="ai-source-text"
-                        aria-label="纯文本内容"
-                        defaultValue={sourceTextRef.current}
-                        onInput={(e) => syncSourceText(e.currentTarget.value)}
-                        className={`${fieldClass} h-full min-h-[120px] flex-1`}
-                        disabled={isGenerating}
-                    />
-                    {!hasSourceText && (
-                        <button
-                            type="button"
-                            onClick={() => void pasteSourceText()}
-                            disabled={isGenerating}
-                            className={`absolute left-3 top-2.5 z-10 ${compactFieldButton}`}
-                        >
-                            <Clipboard size={11} />
-                            粘贴
-                        </button>
-                    )}
-                </div>
-            </div>
-
-            <div className="flex min-h-0 flex-1 flex-col">
-                <div className="mb-2 flex shrink-0 items-center justify-between gap-2">
-                    <span className="flex items-center gap-1">
-                        <span className={labelClass}>Prompt</span>
-                        <button
-                            type="button"
-                            aria-label="复制 Prompt"
-                            disabled={copiedFields.extra || !extraInstruction}
-                            onClick={() => void copyField('extra', extraInstruction)}
-                            className={iconButton}
-                        >
-                            {copiedFields.extra ? <Check size={11} className="text-[#008847] dark:text-[#5de086]" /> : <Copy size={11} />}
-                        </button>
-                        <span className="text-[11px] text-[#86868b] dark:text-[#8e8e93]">{extraInstruction.length} 字</span>
-                    </span>
-                    <span className="flex items-center gap-1">
-                        <button type="button" onClick={() => void pasteExtraInstruction()} disabled={isGenerating} className={compactFieldButton}>
-                            <Clipboard size={11} />
-                            粘贴
-                        </button>
-                        {extraInstruction && (
-                            <>
-                                <button type="button" onClick={clearExtraFormatting} disabled={isGenerating} className={compactFieldButton}>
+                        {hasSourceText && (
+                            <span className={`flex items-center ${btnGap}`}>
+                                <button type="button" onClick={() => void pasteSourceText()} disabled={isGenerating} className={fb}>
+                                    <Clipboard size={11} />
+                                    粘贴
+                                </button>
+                                <button type="button" onClick={clearSourceFormatting} disabled={isGenerating} className={fb}>
                                     <RemoveFormatting size={11} />
                                     清除格式
                                 </button>
-                                <button type="button" onClick={clearExtraInstruction} disabled={isGenerating} className={compactFieldButton}>
+                                <button type="button" onClick={clearSourceText} disabled={isGenerating} className={fb}>
                                     <Eraser size={11} />
                                     清除
                                 </button>
-                            </>
+                            </span>
                         )}
-                    </span>
+                    </div>
+                    <div className="relative flex min-h-0 flex-1">
+                        <textarea
+                            ref={sourceTextareaRef}
+                            data-testid="ai-source-text"
+                            aria-label="纯文本内容"
+                            defaultValue={sourceTextRef.current}
+                            onInput={(e) => syncSourceText(e.currentTarget.value)}
+                            className={`${fieldClass} h-full ${mobile ? 'min-h-[120px]' : 'min-h-[360px]'} flex-1`}
+                            disabled={isGenerating}
+                        />
+                        {!hasSourceText && (
+                            <button
+                                type="button"
+                                onClick={() => void pasteSourceText()}
+                                disabled={isGenerating}
+                                className={`absolute left-3 top-2.5 z-10 ${fb}`}
+                            >
+                                <Clipboard size={11} />
+                                粘贴
+                            </button>
+                        )}
+                    </div>
                 </div>
-                {renderPromptField(true)}
-            </div>
-        </section>
-    );
+
+                <div className={`flex min-h-0 ${mobile ? 'flex-1' : 'flex-[1.1]'} flex-col`}>
+                    <div className={headerCls}>
+                        <span className="flex items-center gap-1">
+                            <span className={labelClass}>Prompt</span>
+                            <button
+                                type="button"
+                                aria-label="复制 Prompt"
+                                disabled={copiedFields.extra || !extraInstruction}
+                                onClick={() => void copyField('extra', extraInstruction)}
+                                className={iconButton}
+                            >
+                                {copiedFields.extra ? <Check size={11} className="text-[#008847] dark:text-[#5de086]" /> : <Copy size={11} />}
+                            </button>
+                            <span className="text-[11px] text-[#86868b] dark:text-[#8e8e93]">{extraInstruction.length} 字</span>
+                        </span>
+                        <span className={`flex items-center ${btnGap}`}>
+                            <button type="button" onClick={() => void pasteExtraInstruction()} disabled={isGenerating} className={fb}>
+                                <Clipboard size={11} />
+                                粘贴
+                            </button>
+                            {extraInstruction && (
+                                <>
+                                    <button type="button" onClick={clearExtraFormatting} disabled={isGenerating} className={fb}>
+                                        <RemoveFormatting size={11} />
+                                        清除格式
+                                    </button>
+                                    <button type="button" onClick={clearExtraInstruction} disabled={isGenerating} className={fb}>
+                                        <Eraser size={11} />
+                                        清除
+                                    </button>
+                                </>
+                            )}
+                        </span>
+                    </div>
+                    {renderPromptField(mobile)}
+                </div>
+            </section>
+        );
+    };
 
     const renderOutputPane = () => (
         <section className="flex min-h-0 flex-col">
@@ -1273,7 +1173,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                                     </button>
                                 </header>
                                 <main className={`grid min-h-0 ${showOutput ? 'grid-cols-[0.95fr_1.05fr] gap-6' : 'grid-cols-1'} overflow-hidden px-7 py-4`}>
-                                    {inputPane}
+                                    {renderInputPane(false)}
                                     {showOutput && renderOutputPane()}
                                 </main>
                                 <footer className="flex justify-end gap-2 px-5 pb-5 pt-1">
@@ -1288,13 +1188,10 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                             animate={{
                                 opacity: 1,
                                 y: 0,
-                                top: isFullscreen || keyboardActive ? 0 : 'auto',
                                 bottom: keyboardHeight,
-                                left: 0,
-                                right: 0,
                                 height: keyboardActive ? `calc(100vh - ${keyboardHeight}px)` : (isFullscreen ? '100vh' : `${sheetHeight}vh`),
-                                borderTopLeftRadius: (isFullscreen || keyboardActive) ? 0 : 14,
-                                borderTopRightRadius: (isFullscreen || keyboardActive) ? 0 : 14,
+                                borderTopLeftRadius: isFullscreen ? 0 : 14,
+                                borderTopRightRadius: isFullscreen ? 0 : 14,
                             }}
                             exit={{ opacity: 0, y: '100%' }}
                             transition={isDragging || keyboardActive
@@ -1341,12 +1238,12 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                                     const target = e.target;
                                     if (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) {
                                         window.setTimeout(() => {
-                                            target.scrollIntoView({ block: 'center', behavior: 'smooth' });
-                                        }, 400);
+                                            target.scrollIntoView({ block: 'center', behavior: 'instant' });
+                                        }, 360);
                                     }
                                 }}
                             >
-                                {mobileInputPane}
+                                {renderInputPane(true)}
                                 {showOutput && renderOutputPane()}
                             </main>
                             <footer className={`flex items-center justify-end gap-[clamp(2px,calc(var(--sh)*0.006),6px)] bg-[#fbfcfe]/96 px-[clamp(8px,calc(var(--sh)*0.012),12px)] py-[clamp(2px,calc(var(--sh)*0.006),6px)] shadow-[0_-14px_26px_rgba(15,23,42,0.06)] backdrop-blur dark:bg-[#1c1c1e]/95 dark:shadow-[0_-14px_26px_rgba(0,0,0,0.18)] ${isFullscreen ? 'pb-[max(env(safe-area-inset-bottom),3px)]' : ''}`}>
