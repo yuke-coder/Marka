@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Moon, Sun, Maximize2 } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { ChatGPTIcon } from '../lib/modelIcons';
 
 interface HeaderProps {
     themeMode: 'light' | 'dark';
@@ -57,18 +58,20 @@ export default function Header({ themeMode, onToggleTheme, onOpenAi, onEnterImme
                 <button
                     data-testid="ai-markdown-open"
                     onClick={onOpenAi}
-                    className="inline-flex items-center gap-1 h-7 px-2 sm:px-2.5 rounded-md border border-[#00000012] dark:border-[#ffffff16] text-[11px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7] bg-white/45 dark:bg-white/[0.06] hover:bg-white/70 dark:hover:bg-white/[0.1] transition-colors active:scale-[0.97]"
+                    aria-label="AI 优化"
+                    title="AI 优化"
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[#00000012] bg-white/45 text-[#1d1d1f] transition-colors hover:bg-white/70 active:scale-[0.97] dark:border-[#ffffff16] dark:bg-white/[0.06] dark:text-[#f5f5f7] dark:hover:bg-white/[0.1]"
                 >
-                    <span className="hidden sm:inline">AI 优化</span>
-                    <span className="sm:hidden">AI</span>
+                    <ChatGPTIcon className="h-[18px] w-[18px]" />
                 </button>
                 <button
                     data-testid="immersive-toggle"
                     onClick={onEnterImmersive}
-                    className="inline-flex items-center gap-1 h-7 px-2 sm:px-2.5 rounded-md border border-[#00000012] dark:border-[#ffffff16] text-[11px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7] bg-white/45 dark:bg-white/[0.06] hover:bg-white/70 dark:hover:bg-white/[0.1] transition-colors active:scale-[0.97]"
+                    aria-label="沉浸编辑"
+                    title="沉浸编辑"
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[#00000012] bg-white/45 text-[#1d1d1f] transition-colors hover:bg-white/70 active:scale-[0.97] dark:border-[#ffffff16] dark:bg-white/[0.06] dark:text-[#f5f5f7] dark:hover:bg-white/[0.1]"
                 >
-                    <Maximize2 size={13} />
-                    <span className="hidden sm:inline">沉浸编辑</span>
+                    <Maximize2 size={17} />
                 </button>
                 <motion.button
                     whileHover={{ scale: 1.05 }}

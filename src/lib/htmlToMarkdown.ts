@@ -101,13 +101,13 @@ function fileToDataUrl(file: File): Promise<string> {
 export function insertAtSelection(
     textarea: HTMLTextAreaElement,
     insertedText: string,
-    setMarkdownInput: (val: string) => void
+    onSourceChange: (val: string) => void
 ) {
     const currentValue = textarea.value;
     const start = textarea.selectionStart;
     const end = textarea.selectionEnd;
     const newValue = currentValue.substring(0, start) + insertedText + currentValue.substring(end);
-    setMarkdownInput(newValue);
+    onSourceChange(newValue);
 
     setTimeout(() => {
         const nextPos = start + insertedText.length;
@@ -118,7 +118,7 @@ export function insertAtSelection(
 
 export function handleSmartPaste(
     e: React.ClipboardEvent<HTMLTextAreaElement>,
-    setMarkdownInput: (val: string) => void
+    onSourceChange: (val: string) => void
 ): void {
     const clipboardData = e.clipboardData;
     if (!clipboardData) return;
@@ -139,7 +139,7 @@ export function handleSmartPaste(
                     .join('\n\n');
 
                 if (!markdownImages) return;
-                insertAtSelection(textarea, markdownImages, setMarkdownInput);
+                insertAtSelection(textarea, markdownImages, onSourceChange);
             })
             .catch((err) => {
                 console.error('Clipboard image conversion failed:', err);
@@ -178,12 +178,12 @@ export function handleSmartPaste(
             markdown = markdown.replace(/\n{3,}/g, '\n\n');
 
             const textarea = e.currentTarget;
-            insertAtSelection(textarea, markdown, setMarkdownInput);
+            insertAtSelection(textarea, markdown, onSourceChange);
         } catch (err) {
             console.error('HTML to Markdown conversion failed:', err);
             // Fallback to text
             const textarea = e.currentTarget;
-            insertAtSelection(textarea, textData, setMarkdownInput);
+            insertAtSelection(textarea, textData, onSourceChange);
         }
     } else if (textData && isMarkdown(textData)) {
         return;

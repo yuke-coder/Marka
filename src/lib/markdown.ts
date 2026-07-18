@@ -175,7 +175,7 @@ export function applyTheme(html: string, themeId: string) {
         const elements = doc.querySelectorAll(selector);
         elements.forEach(el => {
             if (selector === 'code' && el.parentElement?.tagName === 'PRE') return;
-            if (el.tagName === 'IMG' && el.closest('.image-grid')) return;
+            if (el.tagName === 'IMG' && (el.closest('.image-grid') || el.closest('[data-rmarkdown-component]'))) return;
             const currentStyle = el.getAttribute('style') || '';
             el.setAttribute('style', currentStyle + '; ' + style[selector as keyof typeof style]);
         });
@@ -261,6 +261,8 @@ export function applyTheme(html: string, themeId: string) {
     // Unify image look-and-feel across themes.
     doc.querySelectorAll('img').forEach(img => {
         const inGrid = Boolean(img.closest('.image-grid'));
+        const inRMarkdownComponent = Boolean(img.closest('[data-rmarkdown-component]'));
+        if (inRMarkdownComponent) return;
         const currentStyle = img.getAttribute('style') || '';
         const appendedStyle = inGrid
             ? 'display:block; max-width:100%; height:auto; margin:0 !important; padding:8px !important; border-radius:14px !important; box-sizing:border-box; box-shadow:0 12px 28px rgba(15,23,42,0.18), 0 2px 8px rgba(15,23,42,0.12); border:1px solid rgba(255,255,255,0.75);'

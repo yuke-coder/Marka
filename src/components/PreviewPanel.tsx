@@ -1,18 +1,40 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import {
+    useEffect,
+    useImperativeHandle,
+    useLayoutEffect,
+    useRef,
+    useState,
+} from 'react';
 import DeviceFrame, { DEVICE_FRAME_PADDING, DEVICE_FRAME_SIZE } from './DeviceFrame';
+import HtmlPreviewSurface from './preview/HtmlPreviewSurface';
+import MarkdownPreviewSurface from './preview/MarkdownPreviewSurface';
+import {
+    getElementScrollRatio,
+    scrollElementToRatio,
+    type PreviewImageClickInfo,
+    type PreviewSurfaceHandle,
+    type PreviewZoomDirection,
+} from './preview/PreviewSurface';
+import {
+    getMarkaDocumentDefinition,
+    type MarkaDocumentKind,
+} from '../lib/markaDocument';
+
+export type { PreviewSurfaceHandle } from './preview/PreviewSurface';
 
 interface PreviewPanelProps {
     renderedHtml: string;
     deviceWidthClass: string;
     previewDevice: 'mobile' | 'tablet' | 'pc';
     previewRef: React.MutableRefObject<HTMLDivElement | null>;
-    previewOuterScrollRef: React.RefObject<HTMLDivElement>;
-    previewInnerScrollRef: React.RefObject<HTMLDivElement>;
-    onPreviewOuterScroll: () => void;
-    onPreviewInnerScroll: () => void;
+    surfaceRef?: React.Ref<PreviewSurfaceHandle>;
+    onScrollRatio?: (ratio: number) => void;
     scrollSyncEnabled: boolean;
-    onImageClick?: (info: { type: string; index: number; src?: string; alt?: string }) => void;
+    onImageClick?: (info: PreviewImageClickInfo) => void;
+    onPreviewZoom?: (direction: PreviewZoomDirection) => void;
     isMobileView?: boolean;
+    zoom?: number;
+    documentKind?: MarkaDocumentKind;
 }
 
 export default function PreviewPanel({
@@ -20,105 +42,58 @@ export default function PreviewPanel({
     deviceWidthClass,
     previewDevice,
     previewRef,
-    previewOuterScrollRef,
-    previewInnerScrollRef,
-    onPreviewOuterScroll,
-    onPreviewInnerScroll,
+    surfaceRef,
+    onScrollRatio,
     scrollSyncEnabled,
     onImageClick,
-    isMobileView
+    onPreviewZoom,
+    isMobileView,
+    zoom = 1,
+    documentKind = 'markdown',
 }: PreviewPanelProps) {
+    const documentDefinition = getMarkaDocumentDefinition(documentKind);
+    const isolatedPreview = documentDefinition.previewMode === 'isolated';
     const framedDevice = previewDevice === 'pc' || isMobileView ? null : previewDevice;
     const framedDeviceSpacing = 'self-center h-full py-[clamp(6px,1.25vh,12px)] px-[clamp(2px,0.5vw,8px)]';
     const containerRef = useRef<HTMLDivElement>(null);
     const contentRef = useRef<HTMLDivElement>(null);
+    const htmlSurfaceRef = useRef<PreviewSurfaceHandle>(null);
+    const outerScrollRef = useRef<HTMLDivElement>(null);
+    const innerScrollRef = useRef<HTMLDivElement>(null);
+    const zoomWrapperRef = useRef<HTMLDivElement>(null);
     const [screenSize, setScreenSize] = useState<{ width: number; height: number } | undefined>();
-
-    // Sync internal contentRef to external previewRef
-    useEffect(() => {
-        if (!previewRef || !contentRef.current) return;
-        previewRef.current = contentRef.current;
-    }, [previewRef]);
+    const [scaledWrapperHeight, setScaledWrapperHeight] = useState(0);
 
     useEffect(() => {
-        if (!onImageClick) return;
+        previewRef.current = isolatedPreview ? null : contentRef.current;
+        return () => {
+            previewRef.current = null;
+        };
+    }, [isolatedPreview, isMobileView, previewDevice, previewRef]);
 
-        const handleElementClick = (e: MouseEvent) => {
-            const target = e.target as HTMLElement;
-
-            // Find the closest element with location data
-            const element = target.closest('[data-md-type]') as HTMLElement;
-            if (!element) return;
-
-            const mdType = element.getAttribute('data-md-type');
-            const mdIndex = element.getAttribute('data-md-index');
-
-            if (!mdType || mdIndex === null) return;
-
-            // Check if clicked on a link - if so, don't prevent default behavior
-            const clickedLink = target.closest('a') as HTMLAnchorElement;
-            if (clickedLink) {
-                // Link: let it navigate normally
+    useImperativeHandle(surfaceRef, () => ({
+        scrollToRatio: (ratio: number) => {
+            if (isolatedPreview) {
+                htmlSurfaceRef.current?.scrollToRatio(ratio);
                 return;
             }
+            const scrollElement = framedDevice ? innerScrollRef.current : outerScrollRef.current;
+            if (scrollElement) scrollElementToRatio(scrollElement, ratio);
+        },
+    }), [framedDevice, isolatedPreview]);
 
-            // Other elements: prevent default and trigger location
-            e.preventDefault();
-            e.stopPropagation();
-
-            // Prepare click info object
-            const clickInfo: { type: string; index: number; src?: string; alt?: string; content?: string } = {
-                type: mdType,
-                index: parseInt(mdIndex, 10)
-            };
-
-
-            // For images, include src and alt
-            if (mdType === 'image' && target.tagName === 'IMG') {
-                const img = target as HTMLImageElement;
-
-                // Use getAttribute('src') to preserve original path (e.g., "./images/photo.png")
-                // img.src returns resolved absolute URL, which won't match markdown text
-                const originalSrc = img.getAttribute('src') || img.src;
-
-                clickInfo.src = originalSrc;
-                clickInfo.alt = img.alt || img.getAttribute('alt') || '';
-            }
-
-            onImageClick(clickInfo);
-        };
-
-        // Use event delegation on document to handle clicks on dynamically rendered content
-        document.addEventListener('click', handleElementClick);
-
-        // Add visual feedback style for all clickable elements
-        const style = document.createElement('style');
-        style.textContent = `
-            .preview-content [data-md-type] {
-                cursor: pointer;
-                transition: background-color 0.2s ease, outline 0.2s ease;
-            }
-            .preview-content [data-md-type="image"]:hover,
-            .preview-content [data-md-type="paragraph"]:hover {
-                background-color: rgba(0, 102, 204, 0.05);
-                border-radius: 4px;
-            }
-            .preview-content [data-md-type="heading"]:hover {
-                background-color: rgba(0, 102, 204, 0.05);
-                border-radius: 4px;
-            }
-            .preview-content img:hover {
-                outline: 2px solid rgba(0, 102, 204, 0.5);
-                outline-offset: 2px;
-            }
-        `;
-        document.head.appendChild(style);
-
-        return () => {
-            document.removeEventListener('click', handleElementClick);
-            document.head.removeChild(style);
-        };
-    }, [onImageClick]);
+    useEffect(() => {
+        const element = zoomWrapperRef.current;
+        if (!element || zoom <= 1) {
+            setScaledWrapperHeight(0);
+            return;
+        }
+        const measure = () => setScaledWrapperHeight(element.scrollHeight);
+        measure();
+        const observer = new ResizeObserver(measure);
+        observer.observe(element);
+        return () => observer.disconnect();
+    }, [zoom, renderedHtml, previewDevice, isMobileView]);
 
     useLayoutEffect(() => {
         if (!framedDevice) {
@@ -144,7 +119,9 @@ export default function PreviewPanel({
 
             const width = Math.floor(Math.min(screenAvailableWidth, screenAvailableHeight * ratio));
             const height = Math.floor(width / ratio);
-            setScreenSize(prev => prev && prev.width === width && prev.height === height ? prev : { width, height });
+            setScreenSize((previous) => previous && previous.width === width && previous.height === height
+                ? previous
+                : { width, height });
         };
 
         updateSize();
@@ -153,50 +130,90 @@ export default function PreviewPanel({
         return () => observer.disconnect();
     }, [framedDevice]);
 
+    const emitElementScrollRatio = (element: HTMLElement | null) => {
+        if (!element || !scrollSyncEnabled || isolatedPreview) return;
+        onScrollRatio?.(getElementScrollRatio(element));
+    };
+
+    const renderSurface = (htmlClassName: string, markdownClassName: string) => isolatedPreview ? (
+        <HtmlPreviewSurface
+            ref={htmlSurfaceRef}
+            html={renderedHtml}
+            className={htmlClassName}
+            onScrollRatio={scrollSyncEnabled ? onScrollRatio : undefined}
+            onZoom={onPreviewZoom}
+        />
+    ) : (
+        <MarkdownPreviewSurface
+            ref={contentRef}
+            html={renderedHtml}
+            className={markdownClassName}
+            onImageClick={onImageClick}
+        />
+    );
+
     return (
         <div
-            ref={previewOuterScrollRef}
+            ref={outerScrollRef}
             data-testid="preview-outer-scroll"
-            onScroll={scrollSyncEnabled && (isMobileView || !framedDevice) ? onPreviewOuterScroll : undefined}
+            onScroll={!framedDevice && !isolatedPreview && scrollSyncEnabled
+                ? () => emitElementScrollRatio(outerScrollRef.current)
+                : undefined}
             className={`relative overflow-y-auto no-scrollbar flex flex-col z-20 flex-1 min-h-0 w-full overflow-x-hidden scroll-touch ${isMobileView ? 'bg-white dark:bg-[#1c1c1e]' : 'bg-[#f2f2f7]/50 dark:bg-[#000000]'}`}
         >
             {isMobileView ? (
-                <div
-                    ref={contentRef}
-                    data-testid="preview-content"
-                    dangerouslySetInnerHTML={{ __html: renderedHtml }}
-                    className="preview-content w-full px-3 py-2 flex-1"
-                />
-            ) : (
+                <>
+                    <div
+                        ref={zoomWrapperRef}
+                        data-testid="preview-zoom-wrapper"
+                        style={{ transform: `scale(${zoom})`, transformOrigin: 'top left', width: `${100 / zoom}%` }}
+                        className="min-h-full"
+                    >
+                        {renderSurface(
+                            'h-[calc(100vh-116px)] min-h-[520px] w-full',
+                            'w-full px-3 py-2 flex-1',
+                        )}
+                    </div>
+                    {zoom > 1 && <div style={{ height: (zoom - 1) * scaledWrapperHeight }} aria-hidden />}
+                </>
+            ) : renderedHtml ? (
                 <div
                     ref={containerRef}
-                    className={`${deviceWidthClass} ${framedDevice ? framedDeviceSpacing : 'mt-[clamp(8px,2vh,20px)] mb-[clamp(24px,6vh,56px)] ml-[clamp(4px,1vw,16px)] mr-auto h-fit'} ${framedDevice ? '' : 'min-h-[calc(100%-40px)]'} flex ${framedDevice ? 'items-center' : 'items-start'} justify-center relative`}
+                    className={`${deviceWidthClass} ${framedDevice ? framedDeviceSpacing : 'mt-[clamp(8px,2vh,20px)] mb-[clamp(24px,6vh,56px)] mx-auto h-fit'} ${framedDevice ? '' : 'min-h-[calc(100%-40px)]'} flex ${framedDevice ? 'items-center' : 'items-start'} justify-center relative`}
                 >
-                    {framedDevice ? (
-                        <DeviceFrame
-                            device={framedDevice}
-                            scrollRef={previewInnerScrollRef}
-                            onScroll={scrollSyncEnabled ? onPreviewInnerScroll : undefined}
-                            screenSize={screenSize}
-                        >
-                            <div
-                                ref={contentRef}
-                                data-testid="preview-content"
-                                dangerouslySetInnerHTML={{ __html: renderedHtml }}
-                                className={`preview-content min-w-full ${previewDevice === 'mobile' ? 'px-1 pt-1 pb-8' : 'px-2 pt-2 pb-10'}`}
-                            />
-                        </DeviceFrame>
-                    ) : (
-                        <div className="bg-white rounded-[24px] overflow-hidden shadow-apple-lg ring-1 ring-[#00000008] border-t border-white/50 w-full">
-                            <div
-                                ref={contentRef}
-                                data-testid="preview-content"
-                                dangerouslySetInnerHTML={{ __html: renderedHtml }}
-                                className="preview-content min-w-full"
-                            />
-                        </div>
-                    )}
+                    <div
+                        ref={zoomWrapperRef}
+                        data-testid="preview-zoom-wrapper"
+                        style={{ transform: `scale(${zoom})`, transformOrigin: 'top center', width: `${100 / zoom}%` }}
+                        className={framedDevice ? 'flex justify-center' : undefined}
+                    >
+                        {framedDevice ? (
+                            <DeviceFrame
+                                device={framedDevice}
+                                scrollRef={innerScrollRef}
+                                onScroll={!isolatedPreview && scrollSyncEnabled
+                                    ? () => emitElementScrollRatio(innerScrollRef.current)
+                                    : undefined}
+                                screenSize={screenSize}
+                            >
+                                {renderSurface(
+                                    'h-full w-full',
+                                    `min-w-full ${previewDevice === 'mobile' ? 'px-1 pt-1 pb-8' : 'px-2 pt-2 pb-10'}`,
+                                )}
+                            </DeviceFrame>
+                        ) : (
+                            <div className="bg-white rounded-[24px] overflow-hidden shadow-apple-lg ring-1 ring-[#00000008] border-t border-white/50 w-full">
+                                {renderSurface(
+                                    'h-[calc(100vh-160px)] min-h-[560px] w-full',
+                                    'min-w-full',
+                                )}
+                            </div>
+                        )}
+                    </div>
+                    {zoom > 1 && <div style={{ height: (zoom - 1) * scaledWrapperHeight }} aria-hidden />}
                 </div>
+            ) : (
+                <div ref={contentRef} data-testid="preview-content" className="hidden" />
             )}
         </div>
     );

@@ -9,6 +9,8 @@ interface ThemeSelectorProps {
     onThemeChange: (themeId: string) => void;
     mobile?: boolean;
     compact?: boolean;
+    disabled?: boolean;
+    disabledReason?: string;
 }
 
 function extractStyle(styleStr: string, prop: string): string | null {
@@ -286,18 +288,34 @@ function DesktopThemeDropdown({
     return createPortal(panel, document.body);
 }
 
-export default function ThemeSelector({ activeTheme, onThemeChange, mobile, compact }: ThemeSelectorProps) {
+export default function ThemeSelector({
+    activeTheme,
+    onThemeChange,
+    mobile,
+    compact,
+    disabled = false,
+    disabledReason = '当前文档不支持切换排版风格',
+}: ThemeSelectorProps) {
     const [isThemeOpen, setIsThemeOpen] = useState(false);
     const buttonRef = useRef<HTMLButtonElement>(null);
     const selectedThemeName = THEMES.find(t => t.id === activeTheme)?.name;
+
+    useEffect(() => {
+        if (disabled) setIsThemeOpen(false);
+    }, [disabled]);
 
     if (mobile) {
         return (
             <>
             <div className="relative min-w-0 flex items-center">
                 <button
+                    data-testid="theme-selector-mobile"
                     onClick={() => setIsThemeOpen(true)}
-                    className={`inline-flex items-center ${compact ? 'h-7 px-1.5 text-[11px]' : 'h-8 px-2.5 text-[12px]'} rounded-lg font-medium transition-all duration-150 border select-none border-[#00000010] dark:border-[#ffffff16] text-[#5e5e63] dark:text-[#98989d] bg-transparent active:bg-black/[0.06] dark:active:bg-white/[0.08] touch-manipulation active:scale-95 min-w-0`}
+                    disabled={disabled}
+                    aria-disabled={disabled}
+                    data-tooltip={disabled ? disabledReason : undefined}
+                    title={disabled ? disabledReason : undefined}
+                    className={`inline-flex items-center ${compact ? 'h-7 px-1.5 text-[11px]' : 'h-8 px-2.5 text-[12px]'} rounded-lg font-medium transition-all duration-150 border select-none border-[#00000010] dark:border-[#ffffff16] text-[#5e5e63] dark:text-[#98989d] bg-transparent min-w-0 ${disabled ? 'opacity-40 cursor-not-allowed' : 'active:bg-black/[0.06] dark:active:bg-white/[0.08] touch-manipulation active:scale-95'}`}
                 >
                     <span className="truncate text-left">{selectedThemeName || '模板'}</span>
                 </button>
@@ -319,13 +337,28 @@ export default function ThemeSelector({ activeTheme, onThemeChange, mobile, comp
     const isInDropdown = !pillThemes.some(theme => theme.id === activeTheme);
 
     return (
-        <div className="flex items-center gap-2 px-3 lg:px-4 py-0.5 min-w-0 shrink-0">
-            <div className={segWrap} role="group" aria-label="排版风格">
+        <div
+            data-testid="theme-selector"
+            className="flex items-center gap-2 px-3 lg:px-4 py-0.5 min-w-0 shrink-0"
+        >
+            <div
+                className={`${segWrap} ${disabled ? 'opacity-40' : ''}`}
+                role="group"
+                aria-label="排版风格"
+                aria-disabled={disabled}
+                data-tooltip={disabled ? disabledReason : undefined}
+                title={disabled ? disabledReason : undefined}
+            >
                 {pillThemes.map(theme => (
                     <button
                         key={theme.id}
+                        data-testid={`theme-${theme.id}`}
                         onClick={() => onThemeChange(theme.id)}
-                        className={`${pillBtn} ${activeTheme === theme.id ? pillOn : pillOff}`}
+                        disabled={disabled}
+                        className={`${pillBtn} ${disabled
+                            ? 'text-[#8e8e93] dark:text-[#8a8a8f] cursor-not-allowed'
+                            : activeTheme === theme.id ? pillOn : pillOff
+                        }`}
                     >
                         {theme.name.split(' ')[0]}
                     </button>
@@ -335,11 +368,18 @@ export default function ThemeSelector({ activeTheme, onThemeChange, mobile, comp
             <div className="relative shrink-0">
                 <button
                     ref={buttonRef}
+                    data-testid="theme-selector-more"
                     onClick={() => setIsThemeOpen(!isThemeOpen)}
-                    className={`${tbH} gap-1 px-2.5 ${isInDropdown
-                        ? 'border-[#0066cc]/35 dark:border-[#0a84ff]/35 text-[#0066cc] dark:text-[#0a84ff] bg-[#0066cc]/7 dark:bg-[#0a84ff]/10'
-                        : idleStyle
-                        }`}
+                    disabled={disabled}
+                    aria-disabled={disabled}
+                    data-tooltip={disabled ? disabledReason : undefined}
+                    title={disabled ? disabledReason : undefined}
+                    className={`${tbH} gap-1 px-2.5 ${disabled
+                        ? 'border-[#00000010] dark:border-[#ffffff16] text-[#8e8e93] dark:text-[#8a8a8f] opacity-40 cursor-not-allowed'
+                        : isInDropdown
+                            ? 'border-[#0066cc]/35 dark:border-[#0a84ff]/35 text-[#0066cc] dark:text-[#0a84ff] bg-[#0066cc]/7 dark:bg-[#0a84ff]/10'
+                            : idleStyle
+                    }`}
                 >
                     <span className="hidden sm:inline">{isInDropdown ? selectedThemeName : `全部 ${THEMES.length} 款`}</span>
                     <span className="sm:hidden">全部</span>
@@ -355,12 +395,6 @@ export default function ThemeSelector({ activeTheme, onThemeChange, mobile, comp
                 />
             </div>
 
-            <div className="hidden 2xl:flex items-center ml-1 pl-3 min-w-0">
-                <p className="text-[12px] text-[#86868b] dark:text-[#8a8a8f] font-medium tracking-wide truncate max-w-[360px]">
-                    <span className="text-[#1d1d1f] dark:text-[#f5f5f7] font-semibold mr-1">{THEMES.find(t => t.id === activeTheme)?.name}</span>
-                    <span className="text-[#8e8e93] dark:text-[#6c6c70]">{THEMES.find(t => t.id === activeTheme)?.description}</span>
-                </p>
-            </div>
         </div>
     );
 }

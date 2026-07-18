@@ -66,7 +66,7 @@ export function removeMarkdownFormatting(markdown: string) {
 
     return text
         .replace(/[ \t]+\n/g, '\n')
-        .replace(/\n{3,}/g, '\n\n')
+        .replace(/\n{2,}/g, '\n')
         .replace(/[^\S\n]{2,}/g, ' ')
         .replace(/^[ \t]+|[ \t]+$/gm, '')
         .trim();

@@ -58,12 +58,45 @@
         -webkit-touch-callout: none;
     }
 
-    @keyframes mode-tip-progress {
-        from {
-            transform: scaleX(1);
+}
+
+@layer utilities {
+    .glass {
+        @apply bg-white/60 dark:bg-[#1c1c1e]/60 backdrop-blur-[40px] saturate-[1.8];
+    }
+
+    .glass-toolbar {
+        @apply bg-white/70 dark:bg-[#2c2c2e]/70 backdrop-blur-[30px];
+    }
+
+    /* 隐藏滚动条但保留滚动功能 */
+    .no-scrollbar::-webkit-scrollbar {
+        display: none;
+    }
+
+    .no-scrollbar {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+    }
+
+    .ai-editor-content {
+        --ai-status-height: 42px;
+        --ai-status-offset: 2.5rem;
+    }
+
+    .ai-editor-input--with-status {
+        padding-top: calc(var(--ai-status-height) + var(--ai-status-offset));
+    }
+
+    @media (min-width: 640px) {
+        .ai-editor-content {
+            --ai-status-offset: 3.5rem;
         }
-        to {
-            transform: scaleX(0);
+    }
+
+    @media (min-width: 768px) {
+        .ai-editor-content {
+            --ai-status-offset: 4.5rem;
         }
     }
 
@@ -78,57 +111,11 @@
         }
     }
 
-    @keyframes ai-thinking-sweep {
-        from {
-            background-position: 140% 0;
-        }
-        to {
-            background-position: -140% 0;
-        }
-    }
-
-    .mode-tip-progress {
-        transform-origin: left center;
-        animation-name: mode-tip-progress;
-        animation-timing-function: linear;
-        animation-fill-mode: forwards;
-    }
-
-    .mode-tip-progress-paused {
-        animation-play-state: paused;
-    }
-
-    .ai-thinking-status {
-        display: inline-flex;
-        align-items: baseline;
-        color: #6f6f73;
-        letter-spacing: 0;
-    }
-
-    .dark .ai-thinking-status {
-        color: #7b7b80;
-    }
-
-    .ai-thinking-text {
-        display: inline-block;
-        color: transparent;
-        background: linear-gradient(90deg, #6f6f73 0%, #6f6f73 30%, #f5f5f7 47%, #ffffff 50%, #f5f5f7 53%, #6f6f73 70%, #6f6f73 100%);
-        background-size: 260% 100%;
-        -webkit-background-clip: text;
-        background-clip: text;
-        -webkit-text-fill-color: transparent;
-        animation: ai-thinking-sweep 1.45s cubic-bezier(0.22, 0.61, 0.36, 1) infinite;
-    }
-
-    .dark .ai-thinking-text {
-        background-image: linear-gradient(90deg, #7b7b80 0%, #7b7b80 30%, #f5f5f7 47%, #ffffff 50%, #f5f5f7 53%, #7b7b80 70%, #7b7b80 100%);
-    }
-
     .ai-thinking-dots {
         display: inline-flex;
-        align-items: baseline;
+        align-items: center;
         gap: 1mm;
-        margin-left: 3px;
+        margin-left: 1px;
     }
 
     .ai-thinking-dots span {
@@ -137,7 +124,6 @@
         border-radius: 999px;
         background: currentColor;
         opacity: 0.34;
-        transform: translateY(0);
         animation: ai-thinking-dot 1.18s ease-in-out infinite;
     }
 
@@ -147,6 +133,21 @@
 
     .ai-thinking-dots span:nth-child(3) {
         animation-delay: 0.32s;
+    }
+
+    .ai-status-sparkle {
+        flex-shrink: 0;
+        transform-origin: center;
+    }
+
+    .ai-status-sparkle--active {
+        animation: ai-status-sparkle-rotate 3s linear infinite;
+    }
+
+    @keyframes ai-status-sparkle-rotate {
+        to {
+            transform: rotate(360deg);
+        }
     }
 
     .ai-atom-stage {
@@ -193,7 +194,6 @@
         width: 100%;
         height: 100%;
         border-radius: 50%;
-        animation-duration: 1s;
         border-left-width: calc(60px / 25);
         border-top-width: calc(60px / 25);
         border-left-color: #ff1d5e;
@@ -219,64 +219,175 @@
     }
 
     @keyframes atom-spinner-animation-1 {
-        100% {
+        to {
             transform: rotateZ(120deg) rotateX(66deg) rotateZ(360deg);
         }
     }
 
     @keyframes atom-spinner-animation-2 {
-        100% {
+        to {
             transform: rotateZ(240deg) rotateX(66deg) rotateZ(360deg);
         }
     }
 
     @keyframes atom-spinner-animation-3 {
-        100% {
+        to {
             transform: rotateZ(360deg) rotateX(66deg) rotateZ(360deg);
         }
     }
 
+    .ai-generation-label {
+        --ai-generation-text-primary: #757980;
+        --ai-generation-text-secondary: var(--ai-generation-text-primary);
+        --ai-generation-contrast: #ffffffbf;
+        display: inline-block;
+        position: relative;
+        white-space: nowrap;
+        color: var(--ai-generation-text-secondary);
+        background: none;
+        -webkit-background-clip: border-box;
+        background-clip: border-box;
+        -webkit-text-fill-color: currentColor;
+        animation: none;
+    }
+
+    .dark .ai-generation-label {
+        --ai-generation-text-primary: #a1a1a6;
+        --ai-generation-text-secondary: var(--ai-generation-text-primary);
+        --ai-generation-contrast: #0009;
+    }
+
+    @supports (color: color-mix(in lab, red, red)) {
+        .ai-generation-label {
+            --ai-generation-text-secondary: color-mix(in srgb, var(--ai-generation-text-primary) 55%, transparent);
+        }
+
+        .dark .ai-generation-label {
+            --ai-generation-text-secondary: color-mix(in srgb, var(--ai-generation-text-primary) 45%, transparent);
+        }
+    }
+
+    .ai-generation-label,
+    .ai-generation-label * {
+        color: var(--ai-generation-text-secondary);
+    }
+
+    .ai-generation-label__sweep {
+        pointer-events: none;
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 100%;
+        overflow: hidden;
+        transform: translateX(-50%);
+        -webkit-mask-image: linear-gradient(90deg, transparent 0%, black 20% 30%, transparent 50% 100%);
+        mask-image: linear-gradient(90deg, transparent 0%, black 20% 30%, transparent 50% 100%);
+    }
+
+    .ai-generation-label__highlight {
+        display: block;
+        width: 100%;
+        color: var(--ai-generation-contrast);
+        -webkit-text-fill-color: currentColor;
+        transform: translateX(50%);
+    }
+
+    .ai-generation-label--active .ai-generation-label__sweep,
+    .ai-generation-label--active .ai-generation-label__highlight {
+        animation-duration: 1s;
+        animation-timing-function: steps(48, end);
+        animation-iteration-count: 1;
+    }
+
+    .ai-generation-label--active .ai-generation-label__sweep {
+        animation-name: ai-generation-codex-sweep;
+    }
+
+    .ai-generation-label--active .ai-generation-label__highlight {
+        animation-name: ai-generation-codex-highlight;
+    }
+
+    @keyframes ai-generation-codex-sweep {
+        from { transform: translateX(-50%); }
+        to { transform: translateX(125%); }
+    }
+
+    @keyframes ai-generation-codex-highlight {
+        from { transform: translateX(50%); }
+        to { transform: translateX(-125%); }
+    }
+
     @media (prefers-reduced-motion: reduce) {
-        .atom-spinner .spinner-line {
+        .atom-spinner .spinner-line,
+        .ai-thinking-dots span,
+        .ai-status-sparkle--active {
             animation: none;
         }
 
         .ai-thinking-dots span {
-            animation: none;
             opacity: 0.58;
             transform: none;
         }
 
-        .ai-thinking-text {
+        .ai-generation-label--active .ai-generation-label__sweep,
+        .ai-generation-label--active .ai-generation-label__highlight {
             animation: none;
-            color: #6f6f73;
-            background: none;
-            -webkit-text-fill-color: currentColor;
-        }
-
-        .dark .ai-thinking-text {
-            color: #7b7b80;
         }
     }
+
 }
 
-@layer utilities {
-    .glass {
-        @apply bg-white/60 dark:bg-[#1c1c1e]/60 backdrop-blur-[40px] saturate-[1.8];
+/* PDF 导出：直接复制自 lengyi-markdown-editor 的 @media print，仅做选择器最小适配 */
+@media print {
+    header,
+    .glass,
+    .glass-toolbar,
+    .editor-panel,
+    .editor-pane,
+    [role="dialog"],
+    [class*="toast"],
+    [class*="CopyToast"],
+    [class*="drop-overlay"],
+    [class*="divider"],
+    [class*="mobile-tab-bar"],
+    [class*="immersive-exit"],
+    .fixed,
+    .absolute {
+        display: none !important;
     }
 
-    .glass-toolbar {
-        @apply bg-white/70 dark:bg-[#2c2c2e]/70 backdrop-blur-[30px];
+    html, body, #root {
+        height: auto !important;
+        overflow: visible !important;
+        background: #fff !important;
+        color: #000 !important;
     }
 
-    /* 隐藏滚动条但保留滚动功能 */
-    .no-scrollbar::-webkit-scrollbar {
-        display: none;
+    .preview-panel,
+    .preview-content,
+    main {
+        display: block !important;
+        width: 100% !important;
+        max-width: none !important;
+        flex: none !important;
+        border: none !important;
+        background: #fff !important;
+        color: #000 !important;
+        padding: 0 !important;
+        margin: 0 !important;
     }
 
-    .no-scrollbar {
-        -ms-overflow-style: none;
-        scrollbar-width: none;
+    .preview-content * {
+        color: #000 !important;
     }
 
+    .preview-content pre,
+    .preview-content code {
+        background: #f5f5f5 !important;
+        color: #000 !important;
+    }
+
+    .preview-content img {
+        max-width: 100% !important;
+        height: auto !important;
+    }
 }

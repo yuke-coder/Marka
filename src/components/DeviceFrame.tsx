@@ -42,7 +42,11 @@ export default function DeviceFrame({ device, scrollRef, onScroll, screenSize, c
     } as React.CSSProperties;
 
     return (
-        <div className={`relative flex-shrink-0 bg-black shadow-2xl ${sizeClass}`} style={frameStyle}>
+        <div
+            data-testid="preview-device-frame"
+            className={`relative flex-shrink-0 bg-black shadow-2xl ${sizeClass}`}
+            style={frameStyle}
+        >
             {isMobile && <div className="absolute top-2 left-1/2 -translate-x-1/2 w-28 h-7 bg-black rounded-b-2xl z-10" />}
             <div
                 ref={localRef}

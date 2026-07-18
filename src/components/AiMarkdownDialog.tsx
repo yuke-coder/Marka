@@ -1,27 +1,34 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type TouchEvent as ReactTouchEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { md } from '../lib/markdown';
-import { Check, ChevronDown, ChevronRight, Clipboard, Copy, Eraser, Loader2, RefreshCcw, RemoveFormatting, Sparkles, Wand2, X, Zap } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Clipboard, Copy, Eraser, RemoveFormatting, X, Zap } from 'lucide-react';
 import {
     DEFAULT_AI_MARKDOWN_MODEL,
     DEFAULT_AI_MARKDOWN_SPEED,
     DEFAULT_AI_REASONING_EFFORT,
+    AI_CONNECTION_GATE_MS,
     aiMarkdownModels,
     aiMarkdownSpeeds,
     aiReasoningEfforts,
     cleanAiMarkdown,
-    fetchAiMarkdownModels,
     streamAiMarkdown,
     type AiApplyMode,
+    type AiGenerationPhase,
     type AiMarkdownModel,
     type AiMarkdownModelOption,
-    type AiMarkdownRequest,
-    type AiMarkdownMode,
     type AiMarkdownTask,
     type AiMarkdownSpeed,
     type AiReasoningEffort,
 } from '../lib/aiMarkdown';
+import {
+    AI_FORMATTING_PRESET_STORAGE_KEY,
+    DEFAULT_AI_FORMATTING_PRESET,
+    aiFormattingPresets,
+    getAiFormattingPreset,
+    isAiFormattingPresetId,
+    type AiFormattingPresetId,
+} from '../lib/aiFormattingPresets';
 import { ZHOUZUOLUO_PROMPT } from '../lib/prompts/zhouZuoluo';
 import { readClipboardText } from '../lib/clipboard';
 import { removeMarkdownFormatting } from '../lib/markdownUtils';
@@ -34,33 +41,11 @@ interface AiMarkdownDialogProps {
     currentMarkdown: string;
     onClose: () => void;
     onApply: (markdown: string, mode: AiApplyMode) => void;
-    onStreamReplace: (request: AiMarkdownRequest) => void;
+    onStreamOutput?: (text: string) => void;
+    onThinkingDelta?: (delta: string) => void;
+    onGenerationPhaseChange?: (phase: AiGenerationPhase, abort?: () => void) => void;
     showNotice: (title: string, description: string, tone: 'success' | 'download' | 'error') => void;
 }
-
-const modes: Array<{ id: AiMarkdownMode; label: string }> = [
-    { id: 'format', label: '排版模式' },
-    { id: 'rewrite', label: '改写模式' },
-];
-
-const applyModes: Array<{ id: AiApplyMode; label: string }> = [
-    { id: 'replace', label: '替换' },
-    { id: 'insert', label: '插入到光标处' },
-    { id: 'append', label: '追加到末尾' },
-];
-
-const modeTips: Record<AiMarkdownMode, { title: string; body: string }> = {
-    format: {
-        title: '排版模式',
-        body: '完全保留原文内容，只整理层级、标题、列表、引用和重点，让纯文本变成规范 Markdown。',
-    },
-    rewrite: {
-        title: '改写模式',
-        body: '在不编造事实的前提下优化表达、语气和组织方式，更适合发布或继续编辑。',
-    },
-};
-
-const MODE_TIP_DURATION = 3200;
 
 const fieldClass = 'w-full resize-none rounded-md bg-white px-3 py-2.5 text-[13px] leading-6 text-[#1d1d1f] shadow-[inset_0_0_0_1px_rgba(29,29,31,0.1)] outline-none transition placeholder-[#9a9aa0] focus:shadow-[inset_0_0_0_1px_#0a84ff,0_0_0_3px_rgba(10,132,255,0.14)] dark:bg-[#171719] dark:text-[#f5f5f7] dark:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.12)] disabled:opacity-70';
 const ghostButton = 'inline-flex h-8 items-center justify-center gap-1.5 rounded-md bg-[#eef0f4] px-3 text-[12px] font-medium text-[#4b5563] transition-colors hover:bg-[#e4e7ec] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#2c2c2e] dark:text-[#d1d1d6] dark:hover:bg-[#3a3a3c]';
@@ -75,75 +60,63 @@ const promptSurfaceClass = 'rounded-md bg-white px-3 py-2.5 text-[13px] leading-
 const promptFieldClass = `w-full resize-none placeholder-[#9a9aa0] focus-visible:shadow-[inset_0_0_0_1px_#0a84ff] disabled:opacity-70 ${promptSurfaceClass}`;
 const promptOverlayClass = `absolute inset-0 overflow-auto ${promptSurfaceClass} [&_*]:text-[inherit] [&_*]:leading-[inherit] [&_h1]:my-0 [&_h1]:text-[15px] [&_h1]:font-bold [&_h2]:my-0 [&_h2]:text-[14px] [&_h2]:font-semibold [&_h3]:my-0 [&_h3]:font-semibold [&_p]:my-0 [&_ul]:my-0 [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:my-0 [&_ol]:list-decimal [&_ol]:pl-4 [&_li]:my-0 [&_blockquote]:my-0 [&_blockquote]:border-l-2 [&_blockquote]:border-[#d0d7de] [&_blockquote]:pl-2 [&_pre]:my-0 [&_pre]:overflow-auto [&_pre]:rounded [&_pre]:bg-[#f5f5f7] [&_pre]:p-2 dark:[&_pre]:bg-[#262628] [&_code]:font-inherit`;
 
+function getInitialFormattingPreset(): AiFormattingPresetId {
+    try {
+        const stored = window.localStorage.getItem(AI_FORMATTING_PRESET_STORAGE_KEY);
+        return isAiFormattingPresetId(stored) ? stored : DEFAULT_AI_FORMATTING_PRESET;
+    } catch {
+        return DEFAULT_AI_FORMATTING_PRESET;
+    }
+}
+
 export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
-    const { isOpen, isDesktop, currentMarkdown, onClose, onApply, onStreamReplace, showNotice } = props;
-    const [mode, setMode] = useState<AiMarkdownMode>('format');
+    const { isOpen, isDesktop, currentMarkdown, onClose, onApply, onStreamOutput, onThinkingDelta, onGenerationPhaseChange, showNotice } = props;
+    const [formattingPresetId, setFormattingPresetId] = useState<AiFormattingPresetId>(getInitialFormattingPreset);
     const [model, setModel] = useState<AiMarkdownModel>(DEFAULT_AI_MARKDOWN_MODEL);
     const [reasoningEffort, setReasoningEffort] = useState<AiReasoningEffort>(DEFAULT_AI_REASONING_EFFORT);
     const [speed, setSpeed] = useState<AiMarkdownSpeed>(DEFAULT_AI_MARKDOWN_SPEED);
     const [hasSourceText, setHasSourceText] = useState(false);
     const [extraInstruction, setExtraInstruction] = useState('');
-    const [followup, setFollowup] = useState('');
-    const [result, setResult] = useState('');
-    const [applyMode, setApplyMode] = useState<AiApplyMode>('replace');
-    const [phase, setPhase] = useState<'idle' | 'generating' | 'done'>('idle');
-    const [status, setStatus] = useState('');
-    const [interrupted, setInterrupted] = useState(false);
+    const applyMode: AiApplyMode = 'replace';
     const [confirmingReplace, setConfirmingReplace] = useState(false);
-    const [modeTip, setModeTip] = useState<{ mode: AiMarkdownMode; id: number } | null>(null);
-    const [isModeTipPaused, setIsModeTipPaused] = useState(false);
-    const [copiedFields, setCopiedFields] = useState({ source: false, extra: false, followup: false });
+    const [presetMenuOpen, setPresetMenuOpen] = useState(false);
+    const [copiedFields, setCopiedFields] = useState({ source: false, extra: false });
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [settingsSubmenu, setSettingsSubmenu] = useState<null | 'model' | 'speed'>(null);
     const [settingsSubmenuOffset, setSettingsSubmenuOffset] = useState(-10);
-    const [modelOptions, setModelOptions] = useState<AiMarkdownModelOption[]>(aiMarkdownModels);
-    const [isLoadingModels, setIsLoadingModels] = useState(false);
+    const modelOptions: AiMarkdownModelOption[] = aiMarkdownModels;
     const [sheetHeight, setSheetHeight] = useState(88);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [isDragging, setIsDragging] = useState(false);
-    const [modeDrag, setModeDrag] = useState(0);
-    const [isModeDragging, setIsModeDragging] = useState(false);
     const [isPromptRendered, setIsPromptRendered] = useState(false);
     const [keyboardHeight, setKeyboardHeight] = useState(0);
 
     const abortRef = useRef<AbortController | null>(null);
-    const streamedRef = useRef('');
+    const isStreamingRef = useRef(false);
+    const presetDetailsRef = useRef<HTMLDivElement>(null);
     const settingsDetailsRef = useRef<HTMLDivElement>(null);
     const sourceTextRef = useRef('');
+    const sourceLengthRef = useRef<HTMLSpanElement>(null);
     const hasSourceTextRef = useRef(false);
     const sourceTextareaRef = useRef<HTMLTextAreaElement>(null);
-    const sourceLengthRef = useRef<HTMLSpanElement>(null);
     const promptTextareaRef = useRef<HTMLTextAreaElement>(null);
     const promptOverlayRef = useRef<HTMLDivElement>(null);
     const promptScrollTopRef = useRef(0);
-    const modeTipTimerRef = useRef<number | null>(null);
-    const modeTipStartedAtRef = useRef(0);
-    const modeTipRemainingRef = useRef(MODE_TIP_DURATION);
-    const modeSwipeRef = useRef<{ startX: number; startY: number; locked: false | 'h' | 'v' }>({ startX: 0, startY: 0, locked: false });
-    const showNoticeRef = useRef(showNotice);
 
-    const isGenerating = phase === 'generating';
-    const canGenerate = hasSourceText && !isGenerating;
-    const showOutput = phase !== 'idle' || Boolean(result);
+    const canGenerate = hasSourceText;
     const prefersReducedMotion = useReducedMotion();
     const keyboardActive = keyboardHeight > 0;
 
     useEffect(() => {
-        showNoticeRef.current = showNotice;
-    }, [showNotice]);
-
-    useEffect(() => {
         if (!isOpen) {
-            abortRef.current?.abort();
+            if (!isStreamingRef.current) abortRef.current?.abort();
             setConfirmingReplace(false);
             setSettingsOpen(false);
             setSettingsSubmenu(null);
             setSettingsSubmenuOffset(-10);
-            setModeTip(null);
+            setPresetMenuOpen(false);
             setIsFullscreen(false);
             setSheetHeight(88);
-            if (modeTipTimerRef.current) window.clearTimeout(modeTipTimerRef.current);
-            setIsModeTipPaused(false);
             setIsPromptRendered(false);
             setKeyboardHeight(0);
         }
@@ -151,44 +124,12 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
 
     useEffect(() => {
         if (!isOpen) return;
-        let alive = true;
-        setIsLoadingModels(true);
-
-        fetchAiMarkdownModels()
-            .then((models) => {
-                if (!alive) return;
-                if (!models.length) {
-                    showNoticeRef.current('模型列表为空', '当前 OpenAI 账号没有返回可用于文本生成的模型', 'error');
-                    return;
-                }
-                setModelOptions(models);
-                setModel(current => models.some(item => item.id === current) ? current : models[0].id);
-            })
-            .catch((err) => {
-                if (!alive) return;
-                showNoticeRef.current('模型列表获取失败', err instanceof Error ? err.message : '请检查网络、代理或 API Key', 'error');
-            })
-            .finally(() => {
-                if (alive) setIsLoadingModels(false);
-            });
-
-        return () => {
-            alive = false;
-        };
-    }, [isOpen]);
-
-    useEffect(() => () => {
-        if (modeTipTimerRef.current) window.clearTimeout(modeTipTimerRef.current);
-    }, []);
-
-    useEffect(() => {
-        if (!isOpen) return;
         const onKeyDown = (event: KeyboardEvent) => {
-            if (event.key === 'Escape' && isDesktop && !isGenerating) onClose();
+            if (event.key === 'Escape' && isDesktop) onClose();
         };
         document.addEventListener('keydown', onKeyDown);
         return () => document.removeEventListener('keydown', onKeyDown);
-    }, [isOpen, isDesktop, isGenerating, onClose]);
+    }, [isOpen, isDesktop, onClose]);
 
     // 移动端虚拟键盘高度追踪：键盘弹出时收起面板底部并上移，避免遮挡输入框
     useEffect(() => {
@@ -217,21 +158,6 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
             vv.removeEventListener('scroll', update);
         };
     }, [isDesktop, isOpen]);
-
-    const stopGenerating = useCallback(() => {
-        const partial = streamedRef.current || result;
-        abortRef.current?.abort();
-        abortRef.current = null;
-        if (partial.trim()) {
-            setResult(partial);
-            setInterrupted(true);
-            setStatus(`已打断输出，保留 ${partial.length} 字`);
-            setPhase('done');
-        } else {
-            setStatus('已打断输出');
-            setPhase('idle');
-        }
-    }, [result]);
 
     const syncSourceText = useCallback((text: string) => {
         sourceTextRef.current = text;
@@ -275,7 +201,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
             return;
         }
         setExtraInstruction(prev => prev ? `${prev}\n${text}` : text);
-        showNotice('已粘贴', '剪贴板内容已粘贴到 Prompt 输入框', 'success');
+        showNotice('已粘贴', '剪贴板内容已粘贴到补充要求', 'success');
     }, [showNotice]);
 
     const syncPromptScroll = useCallback((scrollTop: number) => {
@@ -287,10 +213,10 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
         setExtraInstruction('');
         setIsPromptRendered(false);
         syncPromptScroll(0);
-        showNotice('已清除', 'Prompt 输入框已清空', 'success');
+        showNotice('已清除', '补充要求已清空', 'success');
     }, [showNotice, syncPromptScroll]);
 
-    const handleZhouZuoluoClick = useCallback(() => {
+    const handleExampleClick = useCallback(() => {
         setExtraInstruction(ZHOUZUOLUO_PROMPT);
         setIsPromptRendered(true);
         syncPromptScroll(0);
@@ -358,24 +284,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
         window.addEventListener('pointercancel', onUp);
     }, [sheetHeight, isFullscreen]);
 
-    const startModeTipTimer = useCallback((id: number, delay: number) => {
-        if (modeTipTimerRef.current) window.clearTimeout(modeTipTimerRef.current);
-        modeTipStartedAtRef.current = Date.now();
-        modeTipRemainingRef.current = delay;
-        modeTipTimerRef.current = window.setTimeout(() => {
-            setModeTip(current => current?.id === id ? null : current);
-            setIsModeTipPaused(false);
-        }, delay);
-    }, []);
-
-    const showModeTip = useCallback((nextMode: AiMarkdownMode) => {
-        const id = Date.now();
-        setIsModeTipPaused(false);
-        setModeTip({ mode: nextMode, id });
-        startModeTipTimer(id, MODE_TIP_DURATION);
-    }, [startModeTipTimer]);
-
-    const copyField = useCallback(async (key: 'source' | 'extra' | 'followup', text: string) => {
+    const copyField = useCallback(async (key: 'source' | 'extra', text: string) => {
         if (copiedFields[key] || !text) return;
         try {
             await navigator.clipboard.writeText(text);
@@ -388,26 +297,6 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
         }
     }, [copiedFields, showNotice]);
 
-    const pauseModeTip = useCallback(() => {
-        if (!modeTip || isModeTipPaused) return;
-        if (modeTipTimerRef.current) window.clearTimeout(modeTipTimerRef.current);
-        modeTipTimerRef.current = null;
-        modeTipRemainingRef.current = Math.max(300, modeTipRemainingRef.current - (Date.now() - modeTipStartedAtRef.current));
-        setIsModeTipPaused(true);
-    }, [isModeTipPaused, modeTip]);
-
-    const resumeModeTip = useCallback(() => {
-        if (!modeTip || !isModeTipPaused) return;
-        setIsModeTipPaused(false);
-        startModeTipTimer(modeTip.id, modeTipRemainingRef.current);
-    }, [isModeTipPaused, modeTip, startModeTipTimer]);
-
-    const switchMode = useCallback((nextMode: AiMarkdownMode) => {
-        if (nextMode === mode) return;
-        setMode(nextMode);
-        showModeTip(nextMode);
-    }, [mode, showModeTip]);
-
     useEffect(() => {
         if (isPromptRendered && promptOverlayRef.current) {
             promptOverlayRef.current.scrollTop = promptScrollTopRef.current;
@@ -416,154 +305,206 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
         }
     }, [isPromptRendered]);
 
-    const handleModeTouchStart = useCallback((event: ReactTouchEvent) => {
-        const touch = event.touches[0];
-        modeSwipeRef.current = { startX: touch.clientX, startY: touch.clientY, locked: false };
-        setModeDrag(0);
-    }, []);
-
-    const handleModeTouchMove = useCallback((event: ReactTouchEvent) => {
-        const touch = event.touches[0];
-        const state = modeSwipeRef.current;
-        const dx = touch.clientX - state.startX;
-        const dy = touch.clientY - state.startY;
-
-        if (!state.locked) {
-            if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
-            state.locked = Math.abs(dx) > Math.abs(dy) ? 'h' : 'v';
-            if (state.locked === 'h') setIsModeDragging(true);
-        }
-
-        if (state.locked === 'h') {
-            event.preventDefault();
-            setModeDrag(Math.max(-80, Math.min(80, dx)));
-        }
-    }, []);
-
-    const handleModeTouchEnd = useCallback(() => {
-        if (modeSwipeRef.current.locked === 'h') {
-            if (mode === 'format' && modeDrag < -42) switchMode('rewrite');
-            if (mode === 'rewrite' && modeDrag > 42) switchMode('format');
-        }
-        modeSwipeRef.current.locked = false;
-        setModeDrag(0);
-        setIsModeDragging(false);
-    }, [mode, modeDrag, switchMode]);
-
     const run = useCallback(async (task: AiMarkdownTask, nextApplyMode: AiApplyMode) => {
-        const partial = result || currentMarkdown;
-        const text = task === 'revise' || task === 'continue' ? partial : (sourceTextareaRef.current?.value ?? sourceTextRef.current);
-        const instruction = task === 'revise' ? followup.trim() || extraInstruction : extraInstruction;
+        const text = sourceTextareaRef.current?.value ?? sourceTextRef.current;
+        const instruction = extraInstruction;
 
         if (!text.trim()) {
-            showNotice(task === 'generate' ? '缺少内容' : '没有可继续处理的 Markdown', task === 'generate' ? '请输入纯文本内容后再生成' : '请检查输入内容后重试', 'error');
+            showNotice('缺少内容', '请输入纯文本内容后再生成', 'error');
             return;
         }
 
         abortRef.current?.abort();
         const controller = new AbortController();
         abortRef.current = controller;
-        setPhase('generating');
-        setInterrupted(false);
-        streamedRef.current = task === 'continue' ? partial : '';
-        if (task !== 'continue') setResult('');
-        setStatus(task === 'continue' ? '正在接着生成...' : task === 'revise' ? '正在继续优化...' : '正在生成 Markdown...');
+        isStreamingRef.current = true;
+        onClose();
+        onGenerationPhaseChange?.('connecting', () => controller.abort());
+
+        let currentPhase: AiGenerationPhase = 'connecting';
+        let connectionTimer: number | null = null;
+        let receivedText = '';
+        let connectionGateReleased = false;
+
+        const setPhase = (phase: AiGenerationPhase) => {
+            if (abortRef.current !== controller) return;
+            if (currentPhase === phase) return;
+            currentPhase = phase;
+            onGenerationPhaseChange?.(phase);
+        };
+
+        const releaseConnectionGate = (phase: 'processing' | 'thinking' | 'finalizing') => {
+            if (connectionGateReleased || abortRef.current !== controller || controller.signal.aborted) return;
+            if (connectionTimer !== null) window.clearTimeout(connectionTimer);
+            connectionTimer = null;
+            connectionGateReleased = true;
+            setPhase(phase);
+        };
+
+        const startConnectionGate = () => {
+            connectionTimer = window.setTimeout(() => {
+                connectionTimer = null;
+                releaseConnectionGate('processing');
+            }, AI_CONNECTION_GATE_MS);
+        };
+
+        const cancelConnectionGate = () => {
+            if (connectionTimer !== null) window.clearTimeout(connectionTimer);
+            connectionTimer = null;
+        };
+
+        const showStreamPhase = (phase: 'thinking' | 'finalizing') => {
+            if (!connectionGateReleased) {
+                releaseConnectionGate(phase);
+                return;
+            }
+            if (phase === 'thinking' && currentPhase === 'finalizing') return;
+            setPhase(phase);
+        };
 
         try {
+            startConnectionGate();
             const markdown = await streamAiMarkdown(
-                { mode, model, reasoningEffort, speed, task, sourceText: text, extraInstruction: instruction },
+                { presetId: formattingPresetId, model, reasoningEffort, speed, task, sourceText: text, extraInstruction: instruction },
                 {
                     signal: controller.signal,
+                    onThinkingDelta: (delta) => {
+                        showStreamPhase('thinking');
+                        onThinkingDelta?.(delta);
+                    },
                     onDelta: (delta) => {
-                        streamedRef.current += delta;
-                        setResult(streamedRef.current);
-                        setStatus(`正在生成，已收到 ${streamedRef.current.length} 字`);
+                        receivedText += delta;
+                        showStreamPhase('finalizing');
+                        onStreamOutput?.(receivedText);
                     },
                 }
             );
-            const cleaned = cleanAiMarkdown(task === 'continue' ? streamedRef.current : markdown);
+
+            const cleaned = cleanAiMarkdown(markdown);
             if (!cleaned) throw new Error('模型没有返回 Markdown 内容');
-            setResult(cleaned);
-            setPhase('done');
-            setStatus(`生成完成，共 ${cleaned.length} 字`);
-            setFollowup('');
+            if (!receivedText) {
+                receivedText = markdown;
+                showStreamPhase('finalizing');
+                onStreamOutput?.(receivedText);
+            }
+            if (controller.signal.aborted) throw new DOMException('Aborted', 'AbortError');
             onApply(cleaned, nextApplyMode);
+            setPhase('completed');
         } catch (err) {
+            cancelConnectionGate();
+            setPhase('idle');
             if (err instanceof DOMException && err.name === 'AbortError') return;
             showNotice('生成失败', err instanceof Error ? err.message : 'AI 生成失败，请稍后重试', 'error');
-            setStatus('生成失败');
         } finally {
-            if (abortRef.current === controller) abortRef.current = null;
+            if (abortRef.current === controller) {
+                abortRef.current = null;
+                isStreamingRef.current = false;
+            }
         }
-    }, [currentMarkdown, extraInstruction, followup, mode, model, onApply, reasoningEffort, result, showNotice, speed]);
-
-    const startStreamReplace = useCallback(() => {
-        onStreamReplace({
-            mode,
-            model,
-            reasoningEffort,
-            speed,
-            task: 'generate',
-            sourceText: sourceTextareaRef.current?.value ?? sourceTextRef.current,
-            extraInstruction,
-        });
-    }, [extraInstruction, mode, model, onStreamReplace, reasoningEffort, speed]);
+    }, [extraInstruction, formattingPresetId, model, onApply, onClose, onStreamOutput, onThinkingDelta, onGenerationPhaseChange, reasoningEffort, showNotice, speed]);
 
     const askConfirm = useCallback(() => {
         if (!canGenerate) return;
         if (!currentMarkdown.trim()) {
-            startStreamReplace();
+            run('generate', applyMode);
             return;
         }
         setConfirmingReplace(true);
-    }, [canGenerate, currentMarkdown, startStreamReplace]);
+    }, [canGenerate, currentMarkdown, applyMode, run]);
 
-    const renderModeSwitch = (mobile = false) => {
-        const activeIndex = mode === 'format' ? 0 : 1;
-        const dragOffset = mobile ? modeDrag / 2 : 0;
+    const changeFormattingPreset = (nextPresetId: AiFormattingPresetId) => {
+        setFormattingPresetId(nextPresetId);
+        setPresetMenuOpen(false);
+        try {
+            window.localStorage.setItem(AI_FORMATTING_PRESET_STORAGE_KEY, nextPresetId);
+        } catch {
+            // The in-memory selection still works when storage is unavailable.
+        }
+    };
+
+    const renderFormattingPresetControl = (mobile = false) => {
+        const selectedPreset = getAiFormattingPreset(formattingPresetId);
 
         return (
             <div
-                className="relative grid grid-cols-2 gap-0.5 rounded-md bg-[#eef0f4] p-0.5 dark:bg-[#262628]"
-                onTouchStart={mobile ? handleModeTouchStart : undefined}
-                onTouchMove={mobile ? handleModeTouchMove : undefined}
-                onTouchEnd={mobile ? handleModeTouchEnd : undefined}
-                onTouchCancel={mobile ? handleModeTouchEnd : undefined}
+                ref={presetDetailsRef}
+                className="relative shrink-0"
+                onBlur={(event) => {
+                    const nextFocus = event.relatedTarget;
+                    if (!(nextFocus instanceof Node) || !event.currentTarget.contains(nextFocus)) {
+                        setPresetMenuOpen(false);
+                    }
+                }}
+                onKeyDown={(event) => {
+                    if (event.key === 'Escape') {
+                        setPresetMenuOpen(false);
+                        event.stopPropagation();
+                    }
+                }}
             >
-                <span
-                    className="absolute bottom-0.5 top-0.5 w-[calc(50%-2px)] rounded bg-white shadow-sm dark:bg-[#3a3a3c]"
-                    style={{
-                        left: '2px',
-                        transform: `translateX(calc(${activeIndex * 100}% + ${activeIndex * 2}px)) translateX(${dragOffset}px)`,
-                        transition: isModeDragging ? 'none' : 'transform 0.2s ease',
-                    }}
-                />
-                {modes.map(item => (
+                <div className="inline-flex h-7 items-center rounded-full bg-[#f0f1f4] p-0.5 dark:bg-[#2c2c2e]">
+                    <span className={`whitespace-nowrap px-2 font-medium text-[#717178] dark:text-[#a1a1a6] ${mobile ? 'text-[12px]' : 'text-[11px]'}`}>
+                        排版方案
+                    </span>
                     <button
-                        key={item.id}
-                        onClick={() => switchMode(item.id)}
-                        className={`relative rounded px-3 py-2 ${mobile ? 'text-[16px]' : 'text-[12px]'} font-semibold transition-colors ${mode === item.id ? 'text-[#1d1d1f] dark:text-[#f5f5f7]' : 'text-[#69707d] dark:text-[#a1a1a6]'}`}
+                        type="button"
+                        data-testid="ai-formatting-preset-trigger"
+                        aria-label={`选择排版方案，当前为${selectedPreset.label}`}
+                        aria-haspopup="menu"
+                        aria-expanded={presetMenuOpen}
+                        onClick={() => {
+                            setSettingsOpen(false);
+                            setSettingsSubmenu(null);
+                            setPresetMenuOpen(open => !open);
+                        }}
+                        className={`inline-flex h-6 items-center gap-1 whitespace-nowrap rounded-full bg-white px-2 font-semibold text-[#1d1d1f] shadow-[0_1px_3px_rgba(0,0,0,0.08)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 dark:bg-[#3a3a3c] dark:text-[#f5f5f7] dark:shadow-[0_1px_3px_rgba(0,0,0,0.24)] ${mobile ? 'text-[12px]' : 'text-[11px]'}`}
                     >
-                        <span className="block">{item.label}</span>
+                        {selectedPreset.shortLabel}
+                        <ChevronDown
+                            size={11}
+                            className={`text-[#717178] transition-transform duration-200 dark:text-[#b8b8bd] ${presetMenuOpen ? 'rotate-180' : ''}`}
+                        />
                     </button>
-                ))}
+                </div>
+                <AnimatePresence initial={false}>
+                    {presetMenuOpen && (
+                        <motion.div
+                            data-testid="ai-formatting-preset-menu"
+                            role="menu"
+                            initial={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: -6, scale: 0.985 }}
+                            animate={prefersReducedMotion ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
+                            exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: -6, scale: 0.985 }}
+                            transition={{ duration: prefersReducedMotion ? 0.1 : 0.16, ease: [0.25, 0.1, 0.25, 1] }}
+                            className={`absolute left-0 top-9 z-[255] w-[286px] max-w-[calc(100vw-32px)] rounded-xl bg-white p-1.5 text-[#1d1d1f] shadow-[0_18px_46px_rgba(15,23,42,0.2)] dark:bg-[#2d2d2f] dark:text-[#f5f5f7] dark:shadow-[0_18px_46px_rgba(0,0,0,0.36)] ${mobile ? '-translate-x-16' : ''}`}
+                        >
+                            {aiFormattingPresets.map(preset => {
+                                const selected = preset.id === formattingPresetId;
+                                return (
+                                    <button
+                                        key={preset.id}
+                                        type="button"
+                                        role="menuitemradio"
+                                        aria-checked={selected}
+                                        data-testid={`ai-formatting-preset-${preset.id}`}
+                                        onClick={() => changeFormattingPreset(preset.id)}
+                                        className={`flex w-full items-start justify-between gap-3 rounded-lg px-2.5 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 ${selected ? 'bg-[#e7f2ff] text-[#006acb] dark:bg-[#0a84ff]/18 dark:text-[#8fc5ff]' : 'hover:bg-black/[0.05] dark:hover:bg-white/[0.08]'}`}
+                                    >
+                                        <span className="min-w-0">
+                                            <span className="block text-[12px] font-semibold leading-5">{preset.label}</span>
+                                            <span className={`block text-[11px] leading-4 ${selected ? 'text-[#326b9f] dark:text-[#9bc4eb]' : 'text-[#717178] dark:text-[#a1a1a6]'}`}>
+                                                {preset.description}
+                                            </span>
+                                        </span>
+                                        {selected && <Check size={13} className="mt-1 shrink-0" />}
+                                    </button>
+                                );
+                            })}
+                        </motion.div>
+                    )}
+                </AnimatePresence>
             </div>
         );
     };
-
-    const renderApplySwitch = () => (
-        <div className="grid grid-cols-3 gap-0.5 rounded-md bg-[#eef0f4] p-0.5 dark:bg-[#262628]">
-            {applyModes.map(item => (
-                <button
-                    key={item.id}
-                    onClick={() => setApplyMode(item.id)}
-                    className={`h-8 rounded text-[12px] font-medium transition-colors ${applyMode === item.id ? 'bg-white text-[#1d1d1f] shadow-sm dark:bg-[#3a3a3c] dark:text-[#f5f5f7]' : 'text-[#69707d] dark:text-[#a1a1a6]'}`}
-                >
-                    {item.label}
-                </button>
-            ))}
-        </div>
-    );
 
     const closeSettingsMenu = () => {
         setSettingsOpen(false);
@@ -611,7 +552,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
     const changeSpeed = selectSetting(aiMarkdownSpeeds, speed, setSpeed, '速度');
 
     const handlePromptOverlayPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-        if (isGenerating || event.button !== 0) return;
+        if (event.button !== 0) return;
         event.preventDefault();
 
         const offset = mapRenderedPointToSource(event.currentTarget, extraInstruction, event.clientX, event.clientY);
@@ -627,7 +568,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
             textarea.setSelectionRange(nextOffset, nextOffset);
             textarea.scrollTop = scrollTop;
         });
-    }, [extraInstruction, isGenerating]);
+    }, [extraInstruction]);
 
     const renderPromptField = (mobile: boolean) => (
         <div className={mobile ? 'relative flex min-h-0 flex-1 flex-col' : 'relative min-h-0 flex-1'}>
@@ -643,9 +584,8 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                     if (extraInstruction.trim()) setIsPromptRendered(true);
                 }}
                 className={`${promptFieldClass} ${mobile ? 'h-full min-h-[72px] flex-1' : 'h-full min-h-[160px] flex-1'} ${isPromptRendered && extraInstruction ? 'text-transparent caret-transparent' : ''}`}
-                placeholder={mode === 'format' ? '' : '例如：改成更适合公众号发布的表达，但不要加入新事实'}
-                disabled={isGenerating}
-            />
+                placeholder=""
+                />
             {isPromptRendered && extraInstruction && (
                 <div
                     ref={promptOverlayRef}
@@ -656,15 +596,15 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                     dangerouslySetInnerHTML={{ __html: md.render(extraInstruction) }}
                 />
             )}
-            {mode === 'format' && !extraInstruction && (
+            {!extraInstruction && (
                 <div className="pointer-events-none absolute left-3 top-2.5 flex flex-wrap items-center gap-1 text-[13px] text-[#9a9aa0]">
-                    <span>例如：保留原文顺序，适当加标题和重点加粗</span>
+                    <span>例如：重点突出实操步骤，整体表达简洁</span>
                     <button
                         type="button"
-                        onClick={handleZhouZuoluoClick}
+                        onClick={handleExampleClick}
                         className={`pointer-events-auto inline-flex items-center rounded-[4px] bg-[#eef0f4] px-1.5 py-0.5 text-[11px] font-medium text-[#4b5563] transition-colors active:scale-95 dark:bg-[#2c2c2e] dark:text-[#d1d1d6] ${mobile ? 'active:bg-[#e4e7ec] dark:active:bg-[#3a3a3c]' : 'hover:bg-[#e4e7ec] dark:hover:bg-[#3a3a3c]'}`}
                     >
-                        粥左罗
+                        示例
                     </button>
                 </div>
             )}
@@ -705,16 +645,15 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                     aria-label="选择模型、推理等级和速度"
                     aria-haspopup="menu"
                     aria-expanded={settingsOpen}
-                    disabled={isGenerating}
                     onClick={() => setSettingsOpen(open => {
                         const next = !open;
                         if (!next) setSettingsSubmenu(null);
                         return next;
                     })}
-                    className={`flex h-7 cursor-pointer select-none items-center gap-1.5 rounded-md bg-[#eef0f4] px-2.5 text-[12px] font-medium text-[#1d1d1f] shadow-[inset_0_0_0_1px_rgba(29,29,31,0.08)] transition-colors ${mobile ? 'active:bg-[#e4e7ec] dark:active:bg-[#3b3b3e]' : 'hover:bg-[#e4e7ec] dark:hover:bg-[#3b3b3e]'} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 dark:bg-[#303033] dark:text-[#f5f5f7] dark:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.07)] ${isGenerating ? 'cursor-not-allowed opacity-55' : ''}`}
+                    className={`flex h-7 cursor-pointer select-none items-center gap-1.5 rounded-md bg-[#eef0f4] px-2.5 text-[12px] font-medium text-[#1d1d1f] shadow-[inset_0_0_0_1px_rgba(29,29,31,0.08)] transition-colors ${mobile ? 'active:bg-[#e4e7ec] dark:active:bg-[#3b3b3e]' : 'hover:bg-[#e4e7ec] dark:hover:bg-[#3b3b3e]'} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 dark:bg-[#303033] dark:text-[#f5f5f7] dark:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.07)]`}
                 >
                     <ModelIcon modelId={selectedModel.id} />
-                    <span>{selectedModel.label}</span>
+                    <span className="whitespace-nowrap">{selectedModel.label}</span>
                     <ChevronDown size={12} className="text-[#69707d] dark:text-[#b8b8bd]" />
                 </button>
                 <AnimatePresence initial={false}>
@@ -758,7 +697,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                                 >
                                     <span className="flex min-w-0 items-center gap-2">
                                         <ModelIcon modelId={selectedModel.id} />
-                                        <span>{selectedModel.label}</span>
+                                        <span className="whitespace-nowrap">{selectedModel.label}</span>
                                     </span>
                                     <ChevronRight size={13} className="text-[#69707d] dark:text-[#a1a1a6]" />
                                 </button>
@@ -767,9 +706,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                                     style={{ top: settingsSubmenuOffset }}
                                 >
                                     <div className="px-2 pb-1 pt-1 text-[12px] font-semibold text-[#69707d] dark:text-[#a1a1a6]">模型</div>
-                                    {isLoadingModels ? (
-                                        <div className="px-2 py-1.5 text-[12px] font-medium text-[#69707d] dark:text-[#a1a1a6]">正在获取模型...</div>
-                                    ) : modelOptions.map(item => (
+                                    {modelOptions.map(item => (
                                         <button
                                             key={item.id}
                                             type="button"
@@ -778,7 +715,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                                         >
                                             <span className="flex min-w-0 items-center gap-2">
                                                 <ModelIcon modelId={item.id} />
-                                                <span>{item.label}</span>
+                                                <span className="whitespace-nowrap">{item.label}</span>
                                             </span>
                                             {model === item.id && <Check size={13} className="shrink-0" />}
                                         </button>
@@ -837,43 +774,6 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
     const renderActions = ({ compact = false }: { compact?: boolean } = {}) => {
         const gb = compact ? compactGhostButton : ghostButton;
         const pb = compact ? compactPrimaryButton : primaryButton;
-        const iconSize = compact ? Math.max(10, Math.min(14, Math.round(sheetHeight * 0.15))) : 13;
-        if (isGenerating) {
-            return (
-                <>
-                    <button onClick={onClose} disabled className={gb}>取消</button>
-                    <button
-                        onClick={stopGenerating}
-                        aria-label="打断输出"
-                        data-tooltip="打断输出"
-                        className={`inline-flex items-center justify-center rounded-md bg-[#1d1d1f] text-white transition-colors hover:bg-[#2f3137] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 dark:bg-[#f5f5f7] ${compact ? 'h-[clamp(20px,calc(var(--sh)*0.03),28px)] w-[clamp(20px,calc(var(--sh)*0.03),28px)]' : 'h-8 w-8'}`}
-                    >
-                        <span className="h-2.5 w-2.5 rounded-[2px] bg-white dark:bg-black" />
-                    </button>
-                </>
-            );
-        }
-
-        if (phase === 'done') {
-            return (
-                <>
-                    {interrupted && (
-                        <button onClick={() => void run('continue', applyMode)} className={pb}>
-                            <Sparkles size={iconSize} />
-                            继续生成
-                        </button>
-                    )}
-                    <button onClick={() => void run('generate', applyMode)} className={gb}>
-                        <RefreshCcw size={iconSize} />
-                        重新生成
-                    </button>
-                    <button onClick={() => void run('revise', applyMode)} disabled={!followup.trim()} className={pb}>
-                        <Wand2 size={iconSize} />
-                        继续优化
-                    </button>
-                </>
-            );
-        }
 
         return (
             <>
@@ -894,7 +794,6 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                 className={`flex min-h-0 ${mobile ? 'flex-1 ' : ''}flex-col gap-3`}
                 style={mobile ? { minHeight: '260px' } : undefined}
             >
-                {!mobile && <div className="shrink-0">{renderModeSwitch()}</div>}
                 <div className={`flex min-h-0 ${mobile ? 'flex-[2]' : 'flex-[1.6]'} flex-col`}>
                     <div className={headerCls}>
                         <span className="flex items-center gap-1">
@@ -912,15 +811,15 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                         </span>
                         {hasSourceText && (
                             <span className={`flex items-center ${btnGap}`}>
-                                <button type="button" onClick={() => void pasteSourceText()} disabled={isGenerating} className={fb}>
+                                <button type="button" onClick={() => void pasteSourceText()} className={fb}>
                                     <Clipboard size={11} />
                                     粘贴
                                 </button>
-                                <button type="button" onClick={clearSourceFormatting} disabled={isGenerating} className={fb}>
+                                <button type="button" onClick={clearSourceFormatting} className={fb}>
                                     <RemoveFormatting size={11} />
                                     清除格式
                                 </button>
-                                <button type="button" onClick={clearSourceText} disabled={isGenerating} className={fb}>
+                                <button type="button" onClick={clearSourceText} className={fb}>
                                     <Eraser size={11} />
                                     清除
                                 </button>
@@ -935,17 +834,19 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                             defaultValue={sourceTextRef.current}
                             onInput={(e) => syncSourceText(e.currentTarget.value)}
                             className={`${fieldClass} h-full ${mobile ? 'min-h-[120px]' : 'min-h-[360px]'} flex-1`}
-                            disabled={isGenerating}
                         />
                         {!hasSourceText && (
                             <button
                                 type="button"
                                 onClick={() => void pasteSourceText()}
-                                disabled={isGenerating}
-                                className={`absolute left-3 top-2.5 z-10 ${fb}`}
+                                className="absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center gap-1.5 rounded-lg border border-dashed border-black/[0.08] bg-[#f5f5f7]/60 px-5 py-4 text-[#86868b] shadow-sm backdrop-blur-sm transition-colors hover:border-[#0a84ff]/30 hover:text-[#0a84ff] active:scale-95 dark:border-white/[0.1] dark:bg-[#2c2c2e]/60 dark:hover:border-[#64aaff]/30 dark:hover:text-[#64aaff]"
+                                aria-label="粘贴纯文本内容"
+                                title="粘贴纯文本内容"
                             >
-                                <Clipboard size={11} />
-                                粘贴
+                                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#eef0f4]/90 dark:bg-[#3a3a3c]/90">
+                                    <Clipboard size={15} />
+                                </span>
+                                <span className="text-[12px] font-medium">粘贴内容</span>
                             </button>
                         )}
                     </div>
@@ -954,10 +855,10 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                 <div className={`flex min-h-0 ${mobile ? 'flex-1' : 'flex-[1.1]'} flex-col`}>
                     <div className={headerCls}>
                         <span className="flex items-center gap-1">
-                            <span className={labelClass}>Prompt</span>
+                            <span className={labelClass}>补充要求</span>
                             <button
                                 type="button"
-                                aria-label="复制 Prompt"
+                                aria-label="复制补充要求"
                                 disabled={copiedFields.extra || !extraInstruction}
                                 onClick={() => void copyField('extra', extraInstruction)}
                                 className={iconButton}
@@ -967,17 +868,17 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                             <span className="text-[11px] text-[#86868b] dark:text-[#8e8e93]">{extraInstruction.length} 字</span>
                         </span>
                         <span className={`flex items-center ${btnGap}`}>
-                            <button type="button" onClick={() => void pasteExtraInstruction()} disabled={isGenerating} className={fb}>
+                            <button type="button" onClick={() => void pasteExtraInstruction()} className={fb}>
                                 <Clipboard size={11} />
                                 粘贴
                             </button>
                             {extraInstruction && (
                                 <>
-                                    <button type="button" onClick={clearExtraFormatting} disabled={isGenerating} className={fb}>
+                                    <button type="button" onClick={clearExtraFormatting} className={fb}>
                                         <RemoveFormatting size={11} />
                                         清除格式
                                     </button>
-                                    <button type="button" onClick={clearExtraInstruction} disabled={isGenerating} className={fb}>
+                                    <button type="button" onClick={clearExtraInstruction} className={fb}>
                                         <Eraser size={11} />
                                         清除
                                     </button>
@@ -990,47 +891,6 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
             </section>
         );
     };
-
-    const renderOutputPane = () => (
-        <section className="flex min-h-0 flex-col">
-            <div className="mb-2 flex items-center justify-between gap-3">
-                <div className="flex min-w-0 items-center gap-2">
-                    {isGenerating ? <Loader2 size={14} className="shrink-0 animate-spin text-[#0066cc] dark:text-[#64aaff]" /> : <Sparkles size={14} className="shrink-0 text-[#0066cc] dark:text-[#64aaff]" />}
-                    <span className="truncate text-[12px] font-semibold text-[#4b5563] dark:text-[#c7c7cc]">{status}</span>
-                </div>
-            </div>
-
-            <pre className={`${isDesktop ? 'min-h-[310px]' : 'min-h-[168px]'} flex-1 overflow-auto whitespace-pre-wrap rounded-md bg-white p-3 font-mono text-[12px] leading-6 text-[#253041] shadow-[inset_0_0_0_1px_rgba(29,29,31,0.09)] dark:bg-[#111113] dark:text-[#e5e5ea] dark:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.1)]`}>
-                {result}
-            </pre>
-
-            {phase === 'done' && (
-                <div className="mt-3 space-y-3">
-                    {renderApplySwitch()}
-                    <label className="block">
-                        <div className="mb-2 flex items-center gap-1">
-                            <span className={labelClass}>继续更改和优化</span>
-                            <button
-                                type="button"
-                                aria-label="复制继续更改和优化"
-                                    disabled={copiedFields.followup || !followup}
-                                onClick={() => void copyField('followup', followup)}
-                                className={iconButton}
-                            >
-                                {copiedFields.followup ? <Check size={11} className="text-[#008847] dark:text-[#5de086]" /> : <Copy size={11} />}
-                            </button>
-                        </div>
-                        <textarea
-                            value={followup}
-                            onChange={(e) => setFollowup(e.target.value)}
-                            className={`${fieldClass} h-20`}
-                            placeholder="例如：标题更克制一些，表格改成列表，减少加粗..."
-                        />
-                    </label>
-                </div>
-            )}
-        </section>
-    );
 
     const confirmReplaceDialog = confirmingReplace && (
         <motion.div
@@ -1058,7 +918,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                     <button
                         onClick={() => {
                             setConfirmingReplace(false);
-                            startStreamReplace();
+                            run('generate', applyMode);
                         }}
                         className={primaryButton}
                     >
@@ -1067,74 +927,6 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                 </div>
             </motion.div>
         </motion.div>
-    );
-
-    const modeTipNotice = modeTip && (
-        isDesktop ? (
-            <motion.div
-                key={modeTip.id}
-                initial={{ opacity: 0, x: '110%', scale: 0.98 }}
-                animate={{ opacity: 1, x: 0, scale: 1 }}
-                exit={{ opacity: 0, x: '110%', scale: 0.98 }}
-                transition={{ duration: 0.24, ease: [0.25, 0.1, 0.25, 1] }}
-                role="status"
-                aria-live="polite"
-                aria-atomic="true"
-                onMouseEnter={pauseModeTip}
-                onMouseLeave={resumeModeTip}
-                className="fixed right-6 top-6 z-[240] w-[360px] max-w-[calc(100vw-32px)] overflow-hidden rounded-lg bg-white shadow-[0_24px_70px_rgba(15,23,42,0.28)] ring-1 ring-black/[0.06] dark:bg-[#242426] dark:ring-white/[0.08]"
-            >
-                <div className="flex items-start gap-3 p-3.5 pr-10">
-                    <div className="min-w-0">
-                        <p className="text-[14px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7]">{modeTips[modeTip.mode].title}</p>
-                        <p className="mt-0.5 text-[12px] leading-5 text-[#5f6875] dark:text-[#c7c7cc]">{modeTips[modeTip.mode].body}</p>
-                    </div>
-                </div>
-                <div className="pointer-events-none absolute inset-y-0 right-8 w-10 bg-gradient-to-r from-transparent to-white dark:to-[#242426]" />
-                <button
-                    type="button"
-                    aria-label="关闭提示"
-                    onClick={(event) => { event.stopPropagation(); setModeTip(null); }}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-[#86868b] transition-colors hover:bg-black/[0.06] hover:text-[#1d1d1f] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 dark:text-[#a1a1a6] dark:hover:bg-white/[0.08] dark:hover:text-[#f5f5f7]"
-                >
-                    <X size={14} />
-                </button>
-                <div
-                    className={`mode-tip-progress h-1 bg-[#0a84ff] dark:bg-[#64aaff] ${isModeTipPaused ? 'mode-tip-progress-paused' : ''}`}
-                    style={{ animationDuration: `${MODE_TIP_DURATION}ms` }}
-                />
-            </motion.div>
-        ) : (
-            <motion.div
-                key={modeTip.id}
-                initial={{ opacity: 0.5, x: '110%', scale: 0.96 }}
-                animate={{ opacity: 1, x: 0, scale: 1 }}
-                exit={{ opacity: 0, x: '110%', scale: 0.96 }}
-                transition={{ duration: 0.24, ease: [0.25, 0.1, 0.25, 1] }}
-                role="status"
-                aria-live="polite"
-                aria-atomic="true"
-                className="fixed right-4 top-4 z-[240] flex w-auto max-w-[min(88vw,280px)] items-start gap-2.5 rounded-lg bg-white px-3 py-2.5 shadow-[0_3px_10px_rgba(0,0,0,0.1),0_3px_3px_rgba(0,0,0,0.05)] will-change-transform dark:bg-[#242426]"
-            >
-                <div className="relative min-w-0 flex-1 overflow-hidden pr-4">
-                    <span className="block text-[13px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7]">{modeTips[modeTip.mode].title}</span>
-                    <span className="block text-[11px] text-[#6b7280] dark:text-[#9ca3af]">{modeTips[modeTip.mode].body}</span>
-                    <div className="pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-r from-transparent to-white dark:to-[#242426]" />
-                </div>
-                <button
-                    type="button"
-                    aria-label="关闭提示"
-                    onClick={(event) => { event.stopPropagation(); setModeTip(null); }}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 shrink-0 rounded-md p-1 text-[#86868b] transition-colors hover:bg-black/[0.06] hover:text-[#1d1d1f] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 dark:text-[#a1a1a6] dark:hover:bg-white/[0.08] dark:hover:text-[#f5f5f7]"
-                >
-                    <X size={14} />
-                </button>
-                <div
-                    className="mode-tip-progress absolute bottom-0 left-0 right-0 h-0.5 bg-[#0a84ff] dark:bg-[#64aaff]"
-                    style={{ animationDuration: `${MODE_TIP_DURATION}ms` }}
-                />
-            </motion.div>
-        )
     );
 
     return createPortal(
@@ -1148,7 +940,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                         animate={{ opacity: isFullscreen ? 0 : 1 }}
                         exit={{ opacity: 0 }}
                         transition={{ duration: prefersReducedMotion ? 0.1 : 0.3, ease: [0.25, 0.1, 0.25, 1] }}
-                        onClick={() => !isGenerating && !isFullscreen && onClose()}
+                        onClick={() => !isFullscreen && onClose()}
                         className="fixed inset-0 z-[200] bg-black/30 backdrop-blur-sm dark:bg-black/50"
                         style={{ pointerEvents: isFullscreen ? 'none' : 'auto' }}
                     />
@@ -1161,20 +953,19 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                                 animate={{ opacity: 1, y: 0, scale: 1 }}
                                 exit={{ opacity: 0, y: 10, scale: 0.98 }}
                                 transition={{ duration: 0.18, ease: [0.25, 0.1, 0.25, 1] }}
-                                className={`${showOutput ? 'h-[min(96vh,920px)] w-[1500px]' : 'h-[min(96vh,860px)] w-[900px]'} grid max-w-[calc(100vw-32px)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-lg bg-[#fbfcfe] shadow-[0_28px_80px_rgba(15,23,42,0.22)] dark:bg-[#1c1c1e]`}
+                                className="h-[min(96vh,860px)] w-[900px] grid max-w-[calc(100vw-32px)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-lg bg-[#fbfcfe] shadow-[0_28px_80px_rgba(15,23,42,0.22)] dark:bg-[#1c1c1e]"
                             >
                                 <header className="flex items-center justify-between gap-3 px-5 pb-2 pt-5">
                                     <div className="flex min-w-0 items-center gap-2">
+                                        {renderFormattingPresetControl()}
                                         {renderSettingsControl()}
-                                        <h2 className="truncate text-[16px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7]">AI 优化 Markdown</h2>
                                     </div>
-                                    <button onClick={onClose} disabled={isGenerating} className="rounded-md p-1.5 text-[#69707d] hover:bg-black/[0.05] disabled:opacity-50 dark:text-[#a1a1a6] dark:hover:bg-white/[0.08]">
+                                    <button onClick={onClose} className="rounded-md p-1.5 text-[#69707d] hover:bg-black/[0.05] dark:text-[#a1a1a6] dark:hover:bg-white/[0.08]">
                                         <X size={18} />
                                     </button>
                                 </header>
-                                <main className={`grid min-h-0 ${showOutput ? 'grid-cols-[0.95fr_1.05fr] gap-6' : 'grid-cols-1'} overflow-hidden px-7 py-4`}>
+                                <main className="grid min-h-0 grid-cols-1 overflow-hidden px-7 py-4">
                                     {renderInputPane(false)}
-                                    {showOutput && renderOutputPane()}
                                 </main>
                                 <footer className="flex justify-end gap-2 px-5 pb-5 pt-1">
                                     {renderActions()}
@@ -1206,7 +997,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                                     }
                                     : { duration: prefersReducedMotion ? 0.05 : 0.12, ease: [0.25, 0.1, 0.25, 1] }
                             }
-                            className={`fixed z-[201] grid overflow-hidden bg-[#fbfcfe] shadow-[0_-22px_64px_rgba(15,23,42,0.2)] dark:bg-[#1c1c1e] will-change-transform`}
+                            className="fixed inset-x-0 z-[201] grid overflow-hidden bg-[#fbfcfe] shadow-[0_-22px_64px_rgba(15,23,42,0.2)] dark:bg-[#1c1c1e] will-change-transform"
                             style={{
                                 gridTemplateRows: 'auto minmax(0, 1fr) auto',
                                 '--sh': keyboardActive ? `calc(100vh - ${keyboardHeight}px)` : (isFullscreen ? '100vh' : `${sheetHeight}vh`),
@@ -1222,15 +1013,13 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                                     <div className="min-w-0">
                                         <div className="flex min-w-0 items-center gap-2">
                                             {renderSettingsControl({ mobile: true })}
-                                            <h2 className="text-[20px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7]">AI 优化</h2>
+                                            {renderFormattingPresetControl(true)}
                                         </div>
-                                        <p className="mt-0.5 truncate text-[12px] text-[#69707d] dark:text-[#a1a1a6]">{status}</p>
                                     </div>
-                                    <button onClick={onClose} disabled={isGenerating} className="rounded-md p-1.5 text-[#69707d] active:bg-black/[0.06] disabled:opacity-50 dark:text-[#a1a1a6] dark:active:bg-white/[0.08]">
+                                    <button onClick={onClose} className="rounded-md p-1.5 text-[#69707d] active:bg-black/[0.06] dark:text-[#a1a1a6] dark:active:bg-white/[0.08]">
                                         <X size={20} />
                                     </button>
                                 </div>
-                                {renderModeSwitch(true)}
                             </header>
                             <main
                                 className="flex min-h-0 flex-col gap-3 overflow-y-auto overscroll-contain px-4 py-3"
@@ -1244,7 +1033,6 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                                 }}
                             >
                                 {renderInputPane(true)}
-                                {showOutput && renderOutputPane()}
                             </main>
                             <footer className={`flex items-center justify-end gap-[clamp(2px,calc(var(--sh)*0.006),6px)] bg-[#fbfcfe]/96 px-[clamp(8px,calc(var(--sh)*0.012),12px)] py-[clamp(2px,calc(var(--sh)*0.006),6px)] shadow-[0_-14px_26px_rgba(15,23,42,0.06)] backdrop-blur dark:bg-[#1c1c1e]/95 dark:shadow-[0_-14px_26px_rgba(0,0,0,0.18)] ${isFullscreen ? 'pb-[max(env(safe-area-inset-bottom),3px)]' : ''}`}>
                                 {renderActions({ compact: true })}
@@ -1255,7 +1043,6 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                     </>
                 )}
             </AnimatePresence>
-            <AnimatePresence>{modeTipNotice}</AnimatePresence>
         </>,
         document.body
     );

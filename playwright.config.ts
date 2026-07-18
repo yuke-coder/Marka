@@ -1,5 +1,11 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const noProxy = [process.env.NO_PROXY, process.env.no_proxy, 'localhost', '127.0.0.1']
+    .filter(Boolean)
+    .join(',');
+process.env.NO_PROXY = noProxy;
+process.env.no_proxy = noProxy;
+
 export default defineConfig({
     testDir: './e2e',
     fullyParallel: true,
