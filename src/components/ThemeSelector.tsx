@@ -314,7 +314,6 @@ export default function ThemeSelector({
                     disabled={disabled}
                     aria-disabled={disabled}
                     data-tooltip={disabled ? disabledReason : undefined}
-                    title={disabled ? disabledReason : undefined}
                     className={`inline-flex items-center ${compact ? 'h-7 px-1.5 text-[11px]' : 'h-8 px-2.5 text-[12px]'} rounded-lg font-medium transition-all duration-150 border select-none border-[#00000010] dark:border-[#ffffff16] text-[#5e5e63] dark:text-[#98989d] bg-transparent min-w-0 ${disabled ? 'opacity-40 cursor-not-allowed' : 'active:bg-black/[0.06] dark:active:bg-white/[0.08] touch-manipulation active:scale-95'}`}
                 >
                     <span className="truncate text-left">{selectedThemeName || '模板'}</span>
@@ -347,7 +346,6 @@ export default function ThemeSelector({
                 aria-label="排版风格"
                 aria-disabled={disabled}
                 data-tooltip={disabled ? disabledReason : undefined}
-                title={disabled ? disabledReason : undefined}
             >
                 {pillThemes.map(theme => (
                     <button
@@ -373,7 +371,6 @@ export default function ThemeSelector({
                     disabled={disabled}
                     aria-disabled={disabled}
                     data-tooltip={disabled ? disabledReason : undefined}
-                    title={disabled ? disabledReason : undefined}
                     className={`${tbH} gap-1 px-2.5 ${disabled
                         ? 'border-[#00000010] dark:border-[#ffffff16] text-[#8e8e93] dark:text-[#8a8a8f] opacity-40 cursor-not-allowed'
                         : isInDropdown

@@ -32,6 +32,28 @@
     .preview-content {
         -webkit-user-select: text;
         user-select: text;
+        min-inline-size: 0;
+        max-inline-size: 100%;
+        overflow-wrap: anywhere;
+        word-wrap: break-word;
+    }
+    /* Every document runtime lives in the same draggable preview canvas.
+       This is intentionally type-neutral: ordinary Markdown, R-Markdown and
+       future custom dialects receive the exact same width safety rules. */
+    .preview-content > * {
+        min-inline-size: 0;
+        max-inline-size: 100%;
+    }
+    .preview-content :where(section, article, aside, div, figure, blockquote, ol, ul, li) {
+        min-inline-size: 0;
+        max-inline-size: 100%;
+    }
+    .preview-content :where(img, svg, video, canvas) {
+        display: block;
+        max-inline-size: 100% !important;
+    }
+    .preview-content :where(img, video, canvas) {
+        block-size: auto;
     }
     input, textarea {
         -webkit-appearance: none;

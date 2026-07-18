@@ -6,9 +6,9 @@ import type {
     FeatureAvailability,
 } from './documentRuntime';
 import { applyTheme, md, preprocessMarkdown } from './markdown';
+import { findMarkdownDialect } from './markdownDialects';
 import { markElementIndexes } from './markdownIndexer';
-import { renderRMarkdown } from './rMarkdownCompat';
-import { detectRMarkdown } from './rMarkdownDialect';
+import { presentRMarkdownDocument } from './rMarkdownPresentation';
 
 const DISABLED_EXPORT_REASON = '该导出格式尚未接入统一文档产物管线';
 
@@ -32,15 +32,20 @@ void DISABLED_EXPORT_REASON;
 export const markdownRuntime: DocumentRuntime<'markdown'> = {
     kind: 'markdown',
     render(document, context: DocumentRenderContext) {
-        const rMarkdown = detectRMarkdown(document.source);
+        const dialect = findMarkdownDialect(document.source);
         const renderMarkdown = (source: string) => md.render(preprocessMarkdown(source));
         const rawHtml = document.source.trim()
-            ? rMarkdown.detected
-                ? renderRMarkdown(document.source, { renderMarkdown })
+            ? dialect
+                ? dialect.render(document.source, renderMarkdown)
                 : renderMarkdown(document.source)
             : '';
-        const html = rawHtml
-            ? markElementIndexes(applyTheme(rawHtml, context.themeId))
+        const presentedHtml = rawHtml
+            ? dialect?.id === 'r-markdown'
+                ? presentRMarkdownDocument(document.source, rawHtml)
+                : applyTheme(rawHtml, context.themeId)
+            : '';
+        const html = presentedHtml
+            ? markElementIndexes(presentedHtml)
             : '';
 
         return createPreviewArtifact({
@@ -48,8 +53,8 @@ export const markdownRuntime: DocumentRuntime<'markdown'> = {
             source: document.source,
             html,
             renderMode: 'themed-dom',
-            variant: rMarkdown.detected
-                ? `rmarkdown-compat-${context.themeId}`
+            variant: dialect
+                ? `${dialect.id}-compat-${context.themeId}`
                 : `theme-${context.themeId}`,
             sanitizerPolicyVersion: 1,
         });

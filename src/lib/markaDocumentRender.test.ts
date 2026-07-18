@@ -43,6 +43,23 @@ describe('MarkaDocument render pipeline', () => {
         expect(source).toContain('<steps');
     });
 
+    it('uses the source-declared DA02 document presentation for R-Markdown', () => {
+        const source = [
+            '<title type="DA02" badge="GUIDE">功能指南</title>',
+            '<p-title num="01" title="图片增强特性" subtitle="IMAGES · 窗口化与并排" level="1"></p-title>',
+        ].join('\n');
+
+        const html = renderMarkaDocumentPreview(createMarkdownDocument(source), 'apple');
+
+        expect(html).toContain('data-rmarkdown-document="DA02"');
+        expect(html).toContain('CHAPTER 01');
+        expect(html).toContain('background:#18181b');
+        expect(html).toContain('width:100%;margin:0');
+        expect(html).not.toContain('max-width:700px');
+        expect(html).not.toContain('container-type');
+        expect(html).not.toContain('data-rmarkdown-component="p-title" style="margin:30px');
+    });
+
     it('does not let the generic image enhancer rewrite R-Markdown image layouts', () => {
         const html = renderMarkaDocumentPreview(createMarkdownDocument(
             '<img src="https://example.com/banner.webp" width="100%" height="120px" radius="8px" fit="cover" />',

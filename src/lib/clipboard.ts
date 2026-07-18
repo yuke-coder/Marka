@@ -1,4 +1,11 @@
-// 三级剪贴板读取策略：navigator.clipboard → items 遍历 → execCommand 降级
+// 三级剪贴板读取策略：ClipboardItem（保留富 HTML）→ 纯文本 → execCommand 降级
+
+export interface ClipboardContent {
+    readonly text: string | null;
+    readonly html: string | null;
+}
+
+export type ClipboardReader = Pick<Clipboard, 'read' | 'readText'>;
 
 export function readClipboardViaTempElement(tag: 'textarea' | 'div'): string | null {
     const el = document.createElement(tag);
@@ -24,21 +31,38 @@ export function readClipboardViaTempElement(tag: 'textarea' | 'div'): string | n
     return text || null;
 }
 
-export async function readClipboardText(): Promise<string | null> {
-    if (navigator.clipboard) {
-        try { return await navigator.clipboard.readText(); } catch { /* 降级 */ }
+export async function readClipboardContent(
+    clipboard: ClipboardReader | undefined = navigator.clipboard,
+): Promise<ClipboardContent> {
+    if (clipboard) {
         try {
-            const items = await navigator.clipboard.read();
+            const items = await clipboard.read();
+            let text: string | null = null;
+            let html: string | null = null;
             for (const item of items) {
-                if (item.types.includes('text/plain')) {
-                    return await (await item.getType('text/plain')).text();
+                if (text === null && item.types.includes('text/plain')) {
+                    text = await (await item.getType('text/plain')).text();
                 }
+                if (html === null && item.types.includes('text/html')) {
+                    html = await (await item.getType('text/html')).text();
+                }
+                if (text !== null && html !== null) break;
             }
+            if (text !== null || html !== null) return { text, html };
+        } catch { /* 降级 */ }
+
+        try {
+            const text = await clipboard.readText();
+            if (text) return { text, html: null };
         } catch { /* 降级 */ }
     }
     let text = readClipboardViaTempElement('textarea');
     if (!text) text = readClipboardViaTempElement('div');
-    return text;
+    return { text, html: null };
+}
+
+export async function readClipboardText(): Promise<string | null> {
+    return (await readClipboardContent()).text;
 }
 
 export function decodeHtmlEntities(text: string) {

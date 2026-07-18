@@ -1,29 +1,24 @@
 import {
     useEffect,
     useImperativeHandle,
-    useLayoutEffect,
     useRef,
     useState,
 } from 'react';
-import DeviceFrame, { DEVICE_FRAME_PADDING, DEVICE_FRAME_SIZE } from './DeviceFrame';
+import DeviceFrame from './DeviceFrame';
 import HtmlPreviewSurface from './preview/HtmlPreviewSurface';
 import MarkdownPreviewSurface from './preview/MarkdownPreviewSurface';
 import {
     getElementScrollRatio,
     scrollElementToRatio,
+    type PreviewSurfaceArtifact,
     type PreviewImageClickInfo,
     type PreviewSurfaceHandle,
     type PreviewZoomDirection,
 } from './preview/PreviewSurface';
-import {
-    getMarkaDocumentDefinition,
-    type MarkaDocumentKind,
-} from '../lib/markaDocument';
-
 export type { PreviewSurfaceHandle } from './preview/PreviewSurface';
 
 interface PreviewPanelProps {
-    renderedHtml: string;
+    previewArtifact: PreviewSurfaceArtifact;
     deviceWidthClass: string;
     previewDevice: 'mobile' | 'tablet' | 'pc';
     previewRef: React.MutableRefObject<HTMLDivElement | null>;
@@ -34,11 +29,10 @@ interface PreviewPanelProps {
     onPreviewZoom?: (direction: PreviewZoomDirection) => void;
     isMobileView?: boolean;
     zoom?: number;
-    documentKind?: MarkaDocumentKind;
 }
 
 export default function PreviewPanel({
-    renderedHtml,
+    previewArtifact,
     deviceWidthClass,
     previewDevice,
     previewRef,
@@ -49,19 +43,19 @@ export default function PreviewPanel({
     onPreviewZoom,
     isMobileView,
     zoom = 1,
-    documentKind = 'markdown',
 }: PreviewPanelProps) {
-    const documentDefinition = getMarkaDocumentDefinition(documentKind);
-    const isolatedPreview = documentDefinition.previewMode === 'isolated';
+    const { html: renderedHtml, renderMode } = previewArtifact;
+    const isolatedPreview = renderMode === 'isolated-html';
     const framedDevice = previewDevice === 'pc' || isMobileView ? null : previewDevice;
-    const framedDeviceSpacing = 'self-center h-full py-[clamp(6px,1.25vh,12px)] px-[clamp(2px,0.5vw,8px)]';
-    const containerRef = useRef<HTMLDivElement>(null);
+    // A simulated device can be taller than the visible preview pane. Keep its
+    // top reachable and let the outer pane scroll instead of vertically centering
+    // the frame into a negative, unreachable position.
+    const framedDeviceSpacing = 'self-center min-h-full py-[clamp(6px,1.25vh,12px)] px-[clamp(2px,0.5vw,8px)]';
     const contentRef = useRef<HTMLDivElement>(null);
     const htmlSurfaceRef = useRef<PreviewSurfaceHandle>(null);
     const outerScrollRef = useRef<HTMLDivElement>(null);
     const innerScrollRef = useRef<HTMLDivElement>(null);
     const zoomWrapperRef = useRef<HTMLDivElement>(null);
-    const [screenSize, setScreenSize] = useState<{ width: number; height: number } | undefined>();
     const [scaledWrapperHeight, setScaledWrapperHeight] = useState(0);
 
     useEffect(() => {
@@ -95,41 +89,6 @@ export default function PreviewPanel({
         return () => observer.disconnect();
     }, [zoom, renderedHtml, previewDevice, isMobileView]);
 
-    useLayoutEffect(() => {
-        if (!framedDevice) {
-            setScreenSize(undefined);
-            return;
-        }
-
-        const element = containerRef.current;
-        if (!element) return;
-        const { width: baseWidth, height: baseHeight } = DEVICE_FRAME_SIZE[framedDevice];
-        const framePadding = DEVICE_FRAME_PADDING[framedDevice];
-        const ratio = baseWidth / baseHeight;
-
-        const updateSize = () => {
-            const styles = window.getComputedStyle(element);
-            const availableWidth = element.clientWidth - parseFloat(styles.paddingLeft) - parseFloat(styles.paddingRight);
-            const availableHeight = element.clientHeight - parseFloat(styles.paddingTop) - parseFloat(styles.paddingBottom);
-            if (availableWidth <= 0 || availableHeight <= 0) return;
-
-            const screenAvailableWidth = availableWidth - framePadding * 2;
-            const screenAvailableHeight = availableHeight - framePadding * 2;
-            if (screenAvailableWidth <= 0 || screenAvailableHeight <= 0) return;
-
-            const width = Math.floor(Math.min(screenAvailableWidth, screenAvailableHeight * ratio));
-            const height = Math.floor(width / ratio);
-            setScreenSize((previous) => previous && previous.width === width && previous.height === height
-                ? previous
-                : { width, height });
-        };
-
-        updateSize();
-        const observer = new ResizeObserver(updateSize);
-        observer.observe(element);
-        return () => observer.disconnect();
-    }, [framedDevice]);
-
     const emitElementScrollRatio = (element: HTMLElement | null) => {
         if (!element || !scrollSyncEnabled || isolatedPreview) return;
         onScrollRatio?.(getElementScrollRatio(element));
@@ -159,7 +118,7 @@ export default function PreviewPanel({
             onScroll={!framedDevice && !isolatedPreview && scrollSyncEnabled
                 ? () => emitElementScrollRatio(outerScrollRef.current)
                 : undefined}
-            className={`relative overflow-y-auto no-scrollbar flex flex-col z-20 flex-1 min-h-0 w-full overflow-x-hidden scroll-touch ${isMobileView ? 'bg-white dark:bg-[#1c1c1e]' : 'bg-[#f2f2f7]/50 dark:bg-[#000000]'}`}
+            className={`relative overflow-y-auto no-scrollbar flex flex-col z-20 flex-1 min-h-0 min-w-0 w-full overflow-x-hidden scroll-touch ${isMobileView ? 'bg-white dark:bg-[#1c1c1e]' : 'bg-[#f2f2f7]/50 dark:bg-[#000000]'}`}
         >
             {isMobileView ? (
                 <>
@@ -178,14 +137,13 @@ export default function PreviewPanel({
                 </>
             ) : renderedHtml ? (
                 <div
-                    ref={containerRef}
-                    className={`${deviceWidthClass} ${framedDevice ? framedDeviceSpacing : 'mt-[clamp(8px,2vh,20px)] mb-[clamp(24px,6vh,56px)] mx-auto h-fit'} ${framedDevice ? '' : 'min-h-[calc(100%-40px)]'} flex ${framedDevice ? 'items-center' : 'items-start'} justify-center relative`}
+                    className={`${deviceWidthClass} min-w-0 max-w-full ${framedDevice ? framedDeviceSpacing : 'mt-[clamp(8px,2vh,20px)] mb-[clamp(24px,6vh,56px)] mx-auto h-fit'} ${framedDevice ? '' : 'min-h-[calc(100%-40px)]'} flex items-start justify-center relative`}
                 >
                     <div
                         ref={zoomWrapperRef}
                         data-testid="preview-zoom-wrapper"
                         style={{ transform: `scale(${zoom})`, transformOrigin: 'top center', width: `${100 / zoom}%` }}
-                        className={framedDevice ? 'flex justify-center' : undefined}
+                        className={framedDevice ? 'flex min-w-0 justify-center' : undefined}
                     >
                         {framedDevice ? (
                             <DeviceFrame
@@ -194,7 +152,6 @@ export default function PreviewPanel({
                                 onScroll={!isolatedPreview && scrollSyncEnabled
                                     ? () => emitElementScrollRatio(innerScrollRef.current)
                                     : undefined}
-                                screenSize={screenSize}
                             >
                                 {renderSurface(
                                     'h-full w-full',

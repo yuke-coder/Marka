@@ -1,4 +1,12 @@
+import type { PreviewArtifact } from '../../lib/documentArtifact';
+
 export type PreviewZoomDirection = 1 | -1;
+
+/**
+ * Shared contract between document runtimes and the common preview shell.
+ * Rendering stays document-specific; the shell only relies on this artifact.
+ */
+export type PreviewSurfaceArtifact = Pick<PreviewArtifact, 'html' | 'renderMode'>;
 
 export interface PreviewSurfaceHandle {
     scrollToRatio: (ratio: number) => void;

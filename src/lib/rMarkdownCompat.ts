@@ -2,15 +2,18 @@ import {
     isRMarkdownBlockComponent,
     isRMarkdownSelfClosingComponent,
 } from './rMarkdownSyntax';
+import { isCustomMarkdownComponentTag } from './customMarkdownComponents';
 
 export interface RMarkdownCompatOptions {
     /** Render ordinary Markdown using Marka's existing renderer. */
     readonly renderMarkdown: (source: string) => string;
 }
 
+type Attributes = Readonly<Record<string, string>>;
+
 interface TagMatch {
     readonly tag: string;
-    readonly attributes: string;
+    readonly attributes: Attributes;
     readonly inlineContent: string | null;
     readonly selfClosing: boolean;
 }
@@ -55,11 +58,16 @@ function safeDimension(value: string | undefined, fallback: string): string {
         : fallback;
 }
 
-function getAttribute(attributes: string, name: string): string | undefined {
-    const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const match = new RegExp(`\\b${escapedName}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i')
-        .exec(attributes);
-    return match?.[1] ?? match?.[2] ?? match?.[3];
+function parseAttributes(source: string): Attributes {
+    const attributes: Record<string, string> = {};
+    for (const match of source.matchAll(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g)) {
+        attributes[match[1].toLowerCase()] = match[2] ?? match[3] ?? match[4];
+    }
+    return attributes;
+}
+
+function getAttribute(attributes: Attributes, name: string): string | undefined {
+    return attributes[name.toLowerCase()];
 }
 
 function parseTag(line: string): TagMatch | null {
@@ -67,7 +75,7 @@ function parseTag(line: string): TagMatch | null {
     if (match) {
         return {
             tag: match[1].toLowerCase(),
-            attributes: match[2],
+            attributes: parseAttributes(match[2]),
             inlineContent: match[3],
             selfClosing: false,
         };
@@ -77,7 +85,7 @@ function parseTag(line: string): TagMatch | null {
     if (!opening) return null;
     return {
         tag: opening[1].toLowerCase(),
-        attributes: opening[2],
+        attributes: parseAttributes(opening[2]),
         inlineContent: null,
         selfClosing: /\/\s*$/.test(opening[2]),
     };
@@ -94,6 +102,14 @@ function color(value: string | undefined, fallback: string): string {
     return /^#[0-9a-f]{3,8}$/i.test(normalized) ? normalized : fallback;
 }
 
+function splitPipeValues(value: string | undefined): string[] {
+    return (value ?? '').split('|').map((item) => item.trim()).filter(Boolean);
+}
+
+function renderPills(values: readonly string[], itemStyle: string): string {
+    return values.map((value) => `<span style="${itemStyle}">${escapeHtml(value)}</span>`).join('');
+}
+
 function parseImage(markdown: string): ImageSpec | null {
     const match = /^!\[([^\]]*)\]\(([^\s)]+)(?:\s+"[^"]*")?\)(?:\[([^\]\s]+)\s+([^\]]+)\])?$/.exec(markdown.trim());
     if (!match) return null;
@@ -105,12 +121,21 @@ function parseImage(markdown: string): ImageSpec | null {
     };
 }
 
-function imageHtml(image: ImageSpec, options?: { readonly className?: string; readonly height?: string }): string {
+function imageHtml(image: ImageSpec, options: {
+    readonly className?: string;
+    readonly height?: string;
+    readonly fit?: string;
+    readonly radius?: string;
+    readonly shadow?: string;
+} = {}): string {
     const width = safeDimension(image.width, '100%');
     const height = safeDimension(options?.height ?? image.height, 'auto');
     const src = safeUrl(image.src);
     const attributes = src ? ` src="${src}"` : '';
-    return `<img${attributes} alt="${escapeHtml(image.alt)}" class="${options?.className ?? 'rmarkdown-image'}" style="display:block;width:${width};max-width:100%;height:${height};object-fit:cover;border-radius:12px;box-shadow:0 10px 28px rgba(15,23,42,.14)">`;
+    const fit = options.fit && /^(?:cover|contain|fill|none|scale-down)$/.test(options.fit) ? options.fit : 'cover';
+    const radius = safeDimension(options.radius, '12px');
+    const shadow = options.shadow ?? '0 10px 28px rgba(15,23,42,.14)';
+    return `<img${attributes} alt="${escapeHtml(image.alt)}" class="${options.className ?? 'rmarkdown-image'}" style="display:block;width:${width};max-width:100%;height:${height};object-fit:${fit};border-radius:${radius}${shadow ? `;box-shadow:${shadow}` : ''}">`;
 }
 
 function renderSizedImage(image: ImageSpec): string {
@@ -132,22 +157,22 @@ function renderImageRow(source: string): string | null {
     return `<div data-rmarkdown-component="image-row" style="display:flex;gap:12px;overflow-x:auto;margin:24px 0;padding:2px">${images.map((image) => imageHtml(image!, { className: 'rmarkdown-image-row-item' })).join('')}</div>`;
 }
 
-function renderTitle(attributes: string, content: string): string {
+function renderTitle(attributes: Attributes, content: string): string {
     const badge = getAttribute(attributes, 'badge');
     const subtitle = getAttribute(attributes, 'subtitle');
-    const chips = (getAttribute(attributes, 'chips') ?? '').split('|').map((chip) => chip.trim()).filter(Boolean);
+    const chips = splitPipeValues(getAttribute(attributes, 'chips'));
     const accent = color(getAttribute(attributes, 'color'), '#4f46e5');
     return [
-        `<section data-rmarkdown-component="title" style="margin:32px 0 28px;padding:32px 26px;border-radius:22px;background:linear-gradient(135deg,${accent},#0f172a);color:#fff;box-shadow:0 16px 38px rgba(30,41,59,.22)">`,
-        badge ? `<p style="margin:0 0 10px;font-size:12px;font-weight:800;letter-spacing:.14em;opacity:.82">${escapeHtml(badge)}</p>` : '',
-        `<h1 style="margin:0;font-size:30px;line-height:1.3;color:inherit">${escapeHtml(content)}</h1>`,
-        subtitle ? `<p style="margin:12px 0 0;font-size:15px;line-height:1.7;opacity:.86">${escapeHtml(subtitle)}</p>` : '',
-        chips.length ? `<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:20px">${chips.map((chip) => `<span style="padding:5px 10px;border-radius:999px;background:rgba(255,255,255,.16);font-size:12px">${escapeHtml(chip)}</span>`).join('')}</div>` : '',
+        `<section data-rmarkdown-component="title" style="margin:0 0 36px;padding:30px 26px;border-radius:0 0 14px 14px;background:#f8fafc;color:#172033;box-shadow:0 15px 34px rgba(0,0,0,.16)">`,
+        badge ? `<p style="margin:0 0 10px;font-size:12px;font-weight:800;letter-spacing:.14em;color:${accent}">${escapeHtml(badge)}</p>` : '',
+        `<h1 style="margin:0;font-size:30px;line-height:1.3;color:#172033">${escapeHtml(content)}</h1>`,
+        subtitle ? `<p style="margin:12px 0 0;font-size:15px;line-height:1.7;color:#475569">${escapeHtml(subtitle)}</p>` : '',
+        chips.length ? `<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:20px">${renderPills(chips, `padding:5px 10px;border-radius:999px;background:${accent};color:#fff;font-size:12px`)}</div>` : '',
         '</section>',
     ].join('');
 }
 
-function renderPTitle(attributes: string): string {
+function renderPTitle(attributes: Attributes): string {
     const level = Math.min(4, Math.max(1, Number(getAttribute(attributes, 'level') ?? '2')));
     const tag = `h${level}`;
     const title = getAttribute(attributes, 'title') ?? '';
@@ -158,18 +183,21 @@ function renderPTitle(attributes: string): string {
     const suffix = getAttribute(attributes, 'suffix') ?? '';
     const size = getAttribute(attributes, 'size');
     const fontSize = level === 1 && size === 'small' ? '24px' : level === 1 && size === 'medium' ? '28px' : `${Math.max(18, 29 - level * 3)}px`;
-    return [
-        `<section data-rmarkdown-component="p-title" style="margin:30px 0 18px">`,
-        '<div style="display:flex;gap:11px;align-items:flex-start">',
-        number ? `<span style="flex:0 0 auto;margin-top:4px;padding:3px 8px;border-radius:999px;background:${accent};color:#fff;font-size:12px;font-weight:800;letter-spacing:.06em">${escapeHtml(number)}</span>` : '',
-        '<div>',
-        `<${tag} style="margin:0;color:#172033;font-size:${fontSize};line-height:1.42">${escapeHtml(prefix)}${escapeHtml(title)}${escapeHtml(suffix)}</${tag}>`,
-        subtitle ? `<p style="margin:5px 0 0;color:#64748b;font-size:12px;letter-spacing:.08em">${escapeHtml(subtitle)}</p>` : '',
-        '</div></div></section>',
-    ].join('');
+    if (level === 1) {
+        return [
+            `<section data-rmarkdown-component="p-title" style="position:relative;margin:42px 0 24px;padding-top:18px;overflow:hidden">`,
+            `<div style="display:flex;align-items:center;gap:12px;color:${accent};font-size:11px;font-weight:800;letter-spacing:.18em"><span>CHAPTER ${escapeHtml(number ?? '01')}</span><span style="height:1px;flex:1;background:rgba(255,255,255,.55)"></span></div>`,
+            number ? `<span aria-hidden="true" style="position:absolute;left:-3px;top:28px;color:rgba(129,140,248,.32);font-size:62px;line-height:1;font-weight:900;letter-spacing:-.08em">${escapeHtml(number)}</span>` : '',
+            `<${tag} style="position:relative;margin:10px 0 0;padding-left:${number ? '48px' : '0'};color:#f8fafc;font-size:${fontSize};line-height:1.22;letter-spacing:-.025em">${escapeHtml(prefix)}${escapeHtml(title)}${escapeHtml(suffix)}</${tag}>`,
+            subtitle ? `<p style="position:relative;margin:5px 0 0;padding-left:${number ? '48px' : '0'};color:${accent};font-size:12px;font-weight:800;letter-spacing:.1em">${escapeHtml(subtitle)}</p>` : '',
+            '</section>',
+        ].join('');
+    }
+
+    return `<section data-rmarkdown-component="p-title" style="margin:34px 0 18px"><${tag} style="margin:0;color:#f8fafc;font-size:${fontSize};line-height:1.42;letter-spacing:-.02em">${number ? `<span style="margin-right:6px;color:${accent};font-weight:900">${escapeHtml(number)}</span>` : ''}${escapeHtml(prefix)}${escapeHtml(title)}${escapeHtml(suffix)}</${tag}>${subtitle ? `<p style="margin:5px 0 0;color:${accent};font-size:12px;font-weight:800;letter-spacing:.1em">${escapeHtml(subtitle)}</p>` : ''}</section>`;
 }
 
-function renderSlider(attributes: string): string {
+function renderSlider(attributes: Attributes): string {
     const images = (getAttribute(attributes, 'images') ?? '')
         .split(',')
         .map((src, index) => ({ alt: `轮播图 ${index + 1}`, src: src.trim() }))
@@ -179,7 +207,7 @@ function renderSlider(attributes: string): string {
     return `<section data-rmarkdown-component="slider" aria-label="图片轮播" style="display:flex;gap:12px;overflow-x:auto;margin:24px 0;padding:2px;scroll-snap-type:x mandatory">${images.map((image) => `<div style="min-width:88%;scroll-snap-align:start">${imageHtml({ ...image, width: '100%', height }, { className: 'rmarkdown-slider-image', height })}</div>`).join('')}</section>`;
 }
 
-function renderExtendedImage(attributes: string): string {
+function renderExtendedImage(attributes: Attributes): string {
     const src = getAttribute(attributes, 'src') ?? '';
     const alt = getAttribute(attributes, 'alt') ?? '';
     const image: ImageSpec = {
@@ -188,45 +216,59 @@ function renderExtendedImage(attributes: string): string {
         width: getAttribute(attributes, 'width'),
         height: getAttribute(attributes, 'height'),
     };
-    const fit = getAttribute(attributes, 'fit');
-    const objectFit = fit && /^(?:cover|contain|fill|none|scale-down)$/.test(fit) ? fit : 'cover';
     const radius = safeDimension(getAttribute(attributes, 'radius'), '12px');
-    const safeSrc = safeUrl(image.src);
-    return `<figure data-rmarkdown-component="img" style="margin:24px 0;overflow:hidden;border-radius:${radius};box-shadow:0 12px 30px rgba(15,23,42,.16)"><img${safeSrc ? ` src="${safeSrc}"` : ''} alt="${escapeHtml(image.alt)}" style="display:block;width:${safeDimension(image.width, '100%')};max-width:100%;height:${safeDimension(image.height, 'auto')};object-fit:${objectFit}"></figure>`;
+    return `<figure data-rmarkdown-component="img" style="margin:24px 0;overflow:hidden;border-radius:${radius};box-shadow:0 12px 30px rgba(15,23,42,.16)">${imageHtml(image, { fit: getAttribute(attributes, 'fit'), radius: '0', shadow: '' })}</figure>`;
 }
 
 function unsupported(component: string, reason = '该组件暂未提供可兼容的展示方式'): string {
     return `<aside data-rmarkdown-component="${component}" data-rmarkdown-state="degraded" style="margin:20px 0;padding:15px 17px;border-radius:14px;background:#fff7ed;color:#9a3412;line-height:1.65"><strong>R-Markdown：${escapeHtml(component)}</strong><br>${escapeHtml(reason)}</aside>`;
 }
 
-function renderBreaking(attributes: string, body: string, options: RMarkdownCompatOptions): string {
+function renderGenericComponent(
+    tag: string,
+    attributes: Attributes,
+    body: string,
+    options: RMarkdownCompatOptions,
+): string {
+    const title = getAttribute(attributes, 'title') ?? getAttribute(attributes, 'label') ?? tag;
+    const content = body.trim()
+        ? renderRMarkdown(body, options)
+        : '<p style="margin:0;color:#64748b">已识别自定义积木；可继续为它补充专属样式。</p>';
+    return `<section data-custom-markdown-component="${escapeHtml(tag)}" style="margin:22px 0;padding:18px;border-radius:16px;background:#f8fafc;color:#1e293b"><p style="margin:0 0 8px;color:#64748b;font-size:11px;font-weight:800;letter-spacing:.1em">自定义积木</p><h3 style="margin:0;color:#172033;font-size:18px">${escapeHtml(title)}</h3><div style="margin-top:12px">${content}</div></section>`;
+}
+
+function renderBreaking(attributes: Attributes, body: string, options: RMarkdownCompatOptions): string {
     const accent = color(getAttribute(attributes, 'color'), '#e11d48');
     const badge = getAttribute(attributes, 'badge');
     const title = getAttribute(attributes, 'title');
     const subtitle = getAttribute(attributes, 'subtitle');
-    const chips = (getAttribute(attributes, 'chips') ?? '').split('|').filter(Boolean);
+    const chips = splitPipeValues(getAttribute(attributes, 'chips'));
     return [
         `<section data-rmarkdown-component="breaking" style="margin:26px 0;padding:24px;border-radius:20px;background:linear-gradient(135deg,${accent},#7f1d1d);color:#fff;box-shadow:0 14px 32px rgba(127,29,29,.2)">`,
         badge ? `<span style="display:inline-block;padding:4px 8px;border-radius:999px;background:rgba(255,255,255,.18);font-size:11px;font-weight:800;letter-spacing:.08em">${escapeHtml(badge)}</span>` : '',
         title ? `<h2 style="margin:12px 0 0;color:inherit;font-size:24px">${escapeHtml(title)}</h2>` : '',
         subtitle ? `<p style="margin:7px 0 0;color:inherit;opacity:.86">${escapeHtml(subtitle)}</p>` : '',
         `<div style="margin-top:14px;color:inherit">${renderRMarkdown(body, options)}</div>`,
-        chips.length ? `<div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:14px">${chips.map((chip) => `<span style="padding:4px 8px;border-radius:999px;background:rgba(255,255,255,.16);font-size:12px">${escapeHtml(chip)}</span>`).join('')}</div>` : '',
+        chips.length ? `<div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:14px">${renderPills(chips, 'padding:4px 8px;border-radius:999px;background:rgba(255,255,255,.16);font-size:12px')}</div>` : '',
         '</section>',
     ].join('');
 }
 
-function parsePipeItems(body: string): Array<{ readonly label: string; readonly detail: string }> {
+function parseListItems(body: string): string[] {
     return body.split(/\r?\n/)
         .map((line) => /^\s*-\s+(.*)$/.exec(line)?.[1])
-        .filter((line): line is string => Boolean(line))
+        .filter((line): line is string => Boolean(line));
+}
+
+function parsePipeItems(body: string): Array<{ readonly label: string; readonly detail: string }> {
+    return parseListItems(body)
         .map((line) => {
             const [label, ...rest] = line.split('|');
             return { label: label.trim(), detail: rest.join('|').trim() };
         });
 }
 
-function renderSteps(attributes: string, body: string): string {
+function renderSteps(attributes: Attributes, body: string): string {
     const items = parsePipeItems(body);
     const vertical = getAttribute(attributes, 'direction') === 'vertical';
     const title = getAttribute(attributes, 'title');
@@ -244,9 +286,7 @@ function renderSteps(attributes: string, body: string): string {
 }
 
 function renderCaseFlow(body: string): string {
-    const items = body.split(/\r?\n/)
-        .map((line) => /^\s*-\s+(.*)$/.exec(line)?.[1])
-        .filter((line): line is string => Boolean(line));
+    const items = parseListItems(body);
     if (!items.length) return unsupported('case-flow', '未识别到案例条目');
     return `<ol data-rmarkdown-component="case-flow" style="display:grid;gap:12px;margin:24px 0;padding:0;list-style:none">${items.map((item, index) => `<li style="padding:17px 18px;border-radius:15px;background:${index % 2 ? '#f8fafc' : '#eef2ff'};color:#1e293b;line-height:1.7">${escapeHtml(item)}</li>`).join('')}</ol>`;
 }
@@ -256,7 +296,7 @@ function slotContent(body: string, slot: 'left' | 'right', options: RMarkdownCom
     return match ? renderRMarkdown(match[1].trim(), options) : null;
 }
 
-function renderCompare(attributes: string, body: string, options: RMarkdownCompatOptions): string {
+function renderCompare(attributes: Attributes, body: string, options: RMarkdownCompatOptions): string {
     const left = slotContent(body, 'left', options);
     const right = slotContent(body, 'right', options);
     if (left === null || right === null) return unsupported('compare', '需要同时提供 left 与 right 内容');
@@ -269,7 +309,7 @@ function renderCompare(attributes: string, body: string, options: RMarkdownCompa
     return `<section data-rmarkdown-component="compare" style="display:${vertical ? 'grid' : 'grid'};grid-template-columns:${vertical ? '1fr' : 'repeat(2,minmax(0,1fr))'};gap:14px;margin:24px 0">${renderSide('left', left)}${renderSide('right', right)}</section>`;
 }
 
-function renderCta(attributes: string): string {
+function renderCta(attributes: Attributes): string {
     const label = getAttribute(attributes, 'label');
     const title = getAttribute(attributes, 'title') ?? '下一步行动';
     const button = getAttribute(attributes, 'button') ?? '开始';
@@ -281,12 +321,13 @@ function renderTimeline(body: string, options: RMarkdownCompatOptions): string {
     if (!items.length) return unsupported('timeline', '未识别到时间线条目');
     return `<ol data-rmarkdown-component="timeline" style="display:grid;gap:14px;margin:24px 0;padding:0;list-style:none">${items.map((item, index) => {
         const parts = [item.label, ...item.detail.split('|')].map((part) => part.trim());
-        const [date, title, detail] = parts;
-        return `<li style="display:grid;grid-template-columns:88px 1fr;gap:14px;align-items:start"><time style="padding:5px 7px;border-radius:8px;background:#eef2ff;color:#4338ca;font-size:12px;font-weight:800;text-align:center">${escapeHtml(date || String(index + 1))}</time><div style="padding:2px 0"><strong style="display:block;color:#172033">${escapeHtml(title ?? '')}</strong>${detail ? `<div style="margin-top:4px;color:#64748b;line-height:1.65">${renderRMarkdown(detail, options)}</div>` : ''}</div></li>`;
+        const [date, title, ...details] = parts;
+        const detailHtml = details.map((detail) => renderRMarkdown(detail, options)).join('');
+        return `<li style="display:grid;grid-template-columns:88px 1fr;gap:14px;align-items:start"><time style="padding:5px 7px;border-radius:8px;background:#eef2ff;color:#4338ca;font-size:12px;font-weight:800;text-align:center">${escapeHtml(date || String(index + 1))}</time><div style="padding:2px 0"><strong style="display:block;color:#172033">${escapeHtml(title ?? '')}</strong>${detailHtml ? `<div style="margin-top:4px;color:#64748b;line-height:1.65">${detailHtml}</div>` : ''}</div></li>`;
     }).join('')}</ol>`;
 }
 
-function renderBadges(attributes: string, body: string): string {
+function renderBadges(attributes: Attributes, body: string): string {
     const tone = getAttribute(attributes, 'tone');
     const background = color(getAttribute(attributes, 'bg') ?? tone, tone === 'yellow' ? '#facc15' : '#4f46e5');
     const foreground = color(getAttribute(attributes, 'color'), tone === 'yellow' ? '#422006' : '#fff');
@@ -302,7 +343,7 @@ function renderLead(body: string, options: RMarkdownCompatOptions): string {
     return `<section data-rmarkdown-component="lead" style="margin:24px 0;padding:16px 19px;border-radius:15px;background:#f1f5f9;color:#334155;font-size:17px;line-height:1.8">${renderRMarkdown(body, options)}</section>`;
 }
 
-function renderEngage(attributes: string): string {
+function renderEngage(attributes: Attributes): string {
     const title = getAttribute(attributes, 'title') ?? '感谢阅读';
     const subtitle = getAttribute(attributes, 'subtitle');
     const accent = color((getAttribute(attributes, 'color') ?? '').split('|')[0], '#4f46e5');
@@ -352,7 +393,7 @@ function transformInlineExtensions(source: string): string {
     }).join('\n');
 }
 
-function renderBlock(tag: string, attributes: string, body: string, options: RMarkdownCompatOptions): string {
+function renderBlock(tag: string, attributes: Attributes, body: string, options: RMarkdownCompatOptions): string {
     switch (tag) {
         case 'breaking': return renderBreaking(attributes, body, options);
         case 'steps': return renderSteps(attributes, body);
@@ -367,7 +408,7 @@ function renderBlock(tag: string, attributes: string, body: string, options: RMa
     }
 }
 
-function renderSelfClosing(tag: string, attributes: string, content: string): string {
+function renderSelfClosing(tag: string, attributes: Attributes, content: string): string {
     switch (tag) {
         case 'title': return renderTitle(attributes, content);
         case 'p-title': return renderPTitle(attributes);
@@ -460,6 +501,28 @@ export function renderRMarkdown(source: string, options: RMarkdownCompatOptions)
                 output.push(unsupported(tag.tag, '缺少结束标签，原内容已保留在编辑区'));
             }
             continue;
+        }
+
+        if (tag && isCustomMarkdownComponentTag(tag.tag)) {
+            if (tag.inlineContent !== null || tag.selfClosing) {
+                flushMarkdown();
+                output.push(renderGenericComponent(tag.tag, tag.attributes, tag.inlineContent ?? '', options));
+                continue;
+            }
+
+            const closePattern = new RegExp(`^\\s*<\\/${tag.tag}\\s*>\\s*$`, 'i');
+            const closeIndex = lines.findIndex((candidate, candidateIndex) => candidateIndex > index && closePattern.test(candidate));
+            if (closeIndex >= 0) {
+                flushMarkdown();
+                output.push(renderGenericComponent(
+                    tag.tag,
+                    tag.attributes,
+                    lines.slice(index + 1, closeIndex).join('\n'),
+                    options,
+                ));
+                index = closeIndex;
+                continue;
+            }
         }
 
         markdownBuffer.push(line);

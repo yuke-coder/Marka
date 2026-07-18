@@ -1,16 +1,17 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { Check, ChevronDown, Copy, RefreshCcw } from 'lucide-react';
+import { Check, ChevronDown, Copy } from 'lucide-react';
 import { handleSmartPaste, insertAtSelection } from '../lib/htmlToMarkdown';
-import { readClipboardText } from '../lib/clipboard';
+import { readClipboardContent } from '../lib/clipboard';
 import {
     detectClipboardDocumentImport,
-    isHtmlSource,
+    detectHtmlDocumentSource,
 } from '../lib/clipboardImport';
 import { type AiGenerationPhase } from '../lib/aiMarkdown';
 import {
     getMarkaDocumentDefinition,
     type MarkaDocumentKind,
 } from '../lib/markaDocument';
+import { isDocumentFeatureEnabled } from '../lib/documentRuntime';
 
 interface EditorPanelProps {
     source: string;
@@ -21,7 +22,6 @@ interface EditorPanelProps {
     onSelectAll?: () => void;
     onClearRequest?: () => void;
     onAbortStream?: () => void;
-    onRegenerateStream?: () => void;
     immersive?: boolean;
     aiThinking?: string;
     isAiThinkingExpanded?: boolean;
@@ -132,12 +132,13 @@ function StatusSparkleIcon({ active }: { active: boolean }) {
     );
 }
 
-export default function EditorPanel({ source, onSourceChange, editorScrollRef, onEditorScroll, scrollSyncEnabled, onSelectAll, onClearRequest, onAbortStream, onRegenerateStream, immersive, aiThinking, isAiThinkingExpanded, onToggleAiThinkingExpanded, aiMainTextStarted, aiGenerationPhase = 'idle', borderSide = 'right', zoom = 1, documentKind = 'markdown', onHtmlDocumentPaste, onPasteFile }: EditorPanelProps) {
+export default function EditorPanel({ source, onSourceChange, editorScrollRef, onEditorScroll, scrollSyncEnabled, onSelectAll, onClearRequest, onAbortStream, immersive, aiThinking, isAiThinkingExpanded, onToggleAiThinkingExpanded, aiMainTextStarted, aiGenerationPhase = 'idle', borderSide = 'right', zoom = 1, documentKind = 'markdown', onHtmlDocumentPaste, onPasteFile }: EditorPanelProps) {
     const [copied, setCopied] = useState(false);
     const contentAreaRef = useRef<HTMLDivElement>(null);
     const statusPanelRef = useRef<HTMLDivElement>(null);
     const documentDefinition = getMarkaDocumentDefinition(documentKind);
-    const editsNativeHtmlSource = !documentDefinition.capabilities.smartPaste;
+    const supportsSmartPaste = isDocumentFeatureEnabled(documentKind, 'smartPaste');
+    const editsNativeHtmlSource = !supportsSmartPaste;
 
     const handleCopy = useCallback(async () => {
         if (copied || !source) return;
@@ -169,17 +170,24 @@ export default function EditorPanel({ source, onSourceChange, editorScrollRef, o
                 return;
             }
         }
-        if (documentDefinition.capabilities.smartPaste) handleSmartPaste(e, onSourceChange);
+        if (supportsSmartPaste) handleSmartPaste(e, onSourceChange);
     };
 
     const handlePasteButton = useCallback(async () => {
         try {
-            const text = await readClipboardText();
-            if (text == null) return;
-            if (!editsNativeHtmlSource && isHtmlSource(text) && onHtmlDocumentPaste) {
-                onHtmlDocumentPaste(text.trim());
+            const clipboardContent = await readClipboardContent();
+            const htmlImport = detectHtmlDocumentSource(
+                clipboardContent.text ?? '',
+                clipboardContent.html ?? '',
+            );
+            if (htmlImport && editsNativeHtmlSource) {
+                onSourceChange(htmlImport.source);
+            } else if (htmlImport && onHtmlDocumentPaste) {
+                onHtmlDocumentPaste(htmlImport.source);
+            } else if (clipboardContent.text !== null) {
+                onSourceChange(clipboardContent.text);
             } else {
-                onSourceChange(text);
+                return;
             }
             editorScrollRef.current?.focus();
         } catch {
@@ -329,16 +337,6 @@ export default function EditorPanel({ source, onSourceChange, editorScrollRef, o
                         aria-label="终止生成"
                     >
                         <span className="h-2 w-2 rounded-[1px] bg-current" />
-                    </button>
-                )}
-                {onRegenerateStream && (
-                    <button
-                        onClick={onRegenerateStream}
-                        className={roundIconButton}
-                        data-tooltip="重新生成"
-                        aria-label="重新生成"
-                    >
-                        <RefreshCcw size={14} />
                     </button>
                 )}
                 {onClearRequest && (

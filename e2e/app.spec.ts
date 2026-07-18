@@ -630,6 +630,41 @@ test('keeps the simulated device centered when editor and preview swap sides', a
     await expect.poll(centerOffset).toBeLessThan(1);
 });
 
+test('keeps tall phone and tablet previews reachable from the top', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 720 });
+    await page.goto('/');
+
+    const frameTopOffset = () => page.evaluate(() => {
+        const preview = document.querySelector('[data-testid="preview-outer-scroll"]')?.getBoundingClientRect();
+        const frame = document.querySelector('[data-testid="preview-device-frame"]')?.getBoundingClientRect();
+        if (!preview || !frame) return Number.NEGATIVE_INFINITY;
+        return frame.top - preview.top;
+    });
+
+    await page.getByTestId('device-mobile').click();
+    await expect.poll(frameTopOffset).toBeGreaterThanOrEqual(0);
+
+    await page.getByTestId('device-tablet').click();
+    await expect.poll(frameTopOffset).toBeGreaterThanOrEqual(0);
+});
+
+test('resizes a simulated phone to stay inside a narrow preview pane', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.addInitScript(() => {
+        localStorage.setItem('marka:splitRatio', '75');
+        localStorage.setItem('marka:previewZoom', '1');
+    });
+    await page.goto('/');
+    await page.getByTestId('device-mobile').click();
+
+    await expect.poll(() => page.evaluate(() => {
+        const preview = document.querySelector('[data-testid="preview-outer-scroll"]')?.getBoundingClientRect();
+        const frame = document.querySelector('[data-testid="preview-device-frame"]')?.getBoundingClientRect();
+        if (!preview || !frame) return Number.POSITIVE_INFINITY;
+        return Math.max(preview.left - frame.left, frame.right - preview.right);
+    })).toBeLessThanOrEqual(0.5);
+});
+
 test('renders R-Markdown imports through the compatibility preview', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto('/');

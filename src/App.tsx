@@ -12,24 +12,26 @@ import { DesktopToolbar, MobileToolbar, type LayoutMode } from './components/Too
 import EditorPanel from './components/EditorPanel';
 import PreviewPanel, { type PreviewSurfaceHandle } from './components/PreviewPanel';
 import Divider from './components/Divider';
-import { DEVICE_FRAME_PADDING, DEVICE_FRAME_SIZE } from './components/DeviceFrame';
+import DeviceFrame from './components/DeviceFrame';
 
 import CopyToast, { type Notice } from './components/CopyToast';
 import Tooltip from './components/Tooltip';
 import AiMarkdownDialog from './components/AiMarkdownDialog';
 import DropOverlay from './components/DropOverlay';
 import PngExportDialog from './components/PngExportDialog';
-import { type AiApplyMode, type AiGenerationPhase } from './lib/aiMarkdown';
+import { type AiGenerationPhase } from './lib/aiMarkdown';
 import { saveBlob } from './lib/fileSave';
 import { isInIframe, fallbackCopyText, fallbackCopyHtml } from './lib/clipboard';
 import { readFile } from './lib/fileImport';
 import { buildDocBlob } from './lib/docExport';
+import { ScrollSyncController } from './lib/scrollSync';
+import { createEmptyPreviewArtifact } from './lib/documentArtifact';
+import { getDocumentFeatureAvailability } from './lib/documentRuntime';
+import { findMarkdownDialect } from './lib/markdownDialects';
 import {
-    applyMarkdownResult,
     createHtmlDocument,
     createMarkdownDocument,
     getMarkaDocumentDefinition,
-    getMarkdownSource,
     insertDocumentFragment,
     isMarkdownDocument,
     updateDocumentSource,
@@ -39,7 +41,7 @@ import { loadMarkaDocument, saveMarkaDocument } from './lib/markaDocumentStorage
 import {
     buildMarkaClipboardPayload,
     getMarkaDocumentExportHtml,
-    renderMarkaDocumentPreview,
+    renderMarkaDocumentArtifact,
 } from './lib/markaDocumentRender';
 
 // 持久化键：布局、主题、面板折叠状态等全部记住；文档自身由 MarkaDocument 负责。
@@ -71,12 +73,9 @@ function loadPreviewDevice(): 'mobile' | 'tablet' | 'pc' {
     }
 }
 
-// 手机和平板预览会等比缩放，这里只限制可用下限，避免中轴线拖动范围被设备名义宽度锁死。
-const PREVIEW_MIN_PX_BY_DEVICE: Record<'mobile' | 'tablet' | 'pc', number> = {
-    mobile: 280,
-    tablet: 420,
-    pc: 680,
-};
+// 分栏拖拽只有一套边界。预览内容的类型和外层设备外观都不参与这套计算，
+// 这样每一类文本都跟随同一块实际可用预览宽度变化。
+const PREVIEW_MIN_PX = 280;
 // 编辑区最小可读宽度
 const EDITOR_MIN_PX = 280;
 
@@ -178,16 +177,15 @@ function loadZoomValue(key: string): number {
     }
 }
 
-// 基于容器可用宽度计算中轴线的合法 [minRatio, maxRatio] 区间
-// previewMinPx 随当前预览模式变化，避免在手机/平板模式下的过度限制
-function computeRatioBounds(containerWidth: number, previewMinPx: number): { min: number; max: number } {
+// 分栏拖拽的唯一边界：只由当前容器和统一最小可读宽度决定。
+function computeRatioBounds(containerWidth: number): { min: number; max: number } {
     if (containerWidth <= 0) return { min: SPLIT_RATIO_DEFAULT, max: SPLIT_RATIO_DEFAULT };
     const dividerWidth = 6;
     const usable = Math.max(0, containerWidth - dividerWidth);
     // 编辑区宽度 = (ratio/100) * usable >= EDITOR_MIN_PX
     const min = Math.max(0, (EDITOR_MIN_PX / usable) * 100);
-    // 预览区宽度 = ((100-ratio)/100) * usable >= previewMinPx
-    const max = Math.min(100, 100 - (previewMinPx / usable) * 100);
+    // 预览区宽度 = ((100-ratio)/100) * usable >= PREVIEW_MIN_PX
+    const max = Math.min(100, 100 - (PREVIEW_MIN_PX / usable) * 100);
     // 兜底：若容器过小不足以同时满足两端，放宽到允许编辑区更窄
     if (min > max) return { min: 0, max: 100 };
     return { min, max };
@@ -249,10 +247,27 @@ export default function App() {
     const [markaDocument, setMarkaDocument] = useState<MarkaDocument>(loadInitialDocument);
     const documentSource = markaDocument.source;
     const documentDefinition = getMarkaDocumentDefinition(markaDocument);
+    const themeAvailability = getDocumentFeatureAvailability(markaDocument.kind, 'theme.select');
+    const sourceDialect = useMemo(
+        () => markaDocument.kind === 'markdown' ? findMarkdownDialect(documentSource) : undefined,
+        [documentSource, markaDocument.kind],
+    );
+    const usesSourceDeclaredTheme = sourceDialect?.id === 'r-markdown';
+    const themeSelectionDisabled = themeAvailability.state !== 'enabled' || usesSourceDeclaredTheme;
+    const themeSelectionDisabledReason = usesSourceDeclaredTheme
+        ? '此 R-Markdown 文件自带 DA02 排版，Marka 主题不会覆盖它'
+        : themeAvailability.state === 'enabled'
+            ? undefined
+            : themeAvailability.reason;
+    const scrollSyncAvailability = getDocumentFeatureAvailability(markaDocument.kind, 'scroll.sync');
+    const sourceLocationAvailability = getDocumentFeatureAvailability(markaDocument.kind, 'source.location');
+    const wordExportAvailability = getDocumentFeatureAvailability(markaDocument.kind, 'export.word');
+    const canSyncScroll = scrollSyncAvailability.state === 'enabled';
     const setDocumentSource = useCallback((source: string) => {
         setMarkaDocument((current) => updateDocumentSource(current, source));
     }, []);
-    const [renderedHtml, setRenderedHtml] = useState<string>('');
+    const [previewArtifact, setPreviewArtifact] = useState(() => createEmptyPreviewArtifact(markaDocument.kind));
+    const renderedHtml = previewArtifact.html;
     const [activeTheme, setActiveTheme] = useState<string>(loadActiveTheme);
     const [notice, setNotice] = useState<Notice | null>(null);
     const noticeIdRef = useRef(0);
@@ -297,8 +312,7 @@ export default function App() {
     const editorScrollRef = useRef<HTMLTextAreaElement>(null);
     const previewSurfaceRef = useRef<PreviewSurfaceHandle>(null);
     const aiStreamAbortRef = useRef<(() => void) | null>(null);
-    const scrollSyncLockRef = useRef<'editor' | 'preview' | null>(null);
-    const scrollLockReleaseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const scrollSyncControllerRef = useRef(new ScrollSyncController());
     const activePanelRef = useRef(activePanel);
     activePanelRef.current = activePanel;
 
@@ -407,11 +421,7 @@ export default function App() {
     }, [isDesktop]);
 
     const resetScrollSyncLock = useCallback(() => {
-        scrollSyncLockRef.current = null;
-        if (scrollLockReleaseTimeoutRef.current) {
-            clearTimeout(scrollLockReleaseTimeoutRef.current);
-            scrollLockReleaseTimeoutRef.current = null;
-        }
+        scrollSyncControllerRef.current.reset();
     }, []);
 
     // 沉浸模式下按 ESC 退出
@@ -665,9 +675,8 @@ export default function App() {
         };
     }, []);
 
-    // 基于当前容器宽度与预览模式计算动态边界
-    const previewMinPx = PREVIEW_MIN_PX_BY_DEVICE[previewDevice];
-    const ratioBounds = useMemo(() => computeRatioBounds(containerWidth, previewMinPx), [containerWidth, previewMinPx]);
+    // 分栏拖拽是预览宽度的唯一控制源；不再根据文档或设备类型切换边界。
+    const ratioBounds = useMemo(() => computeRatioBounds(containerWidth), [containerWidth]);
 
     // 容器宽度变化（如窗口缩放）时，若已保存的 ratio 越界则自动收回
     // 初始化阶段 containerWidth 为 0，ratioBounds 为默认值 {DEFAULT,DEFAULT}，
@@ -688,7 +697,7 @@ export default function App() {
 
         const rect = mainRef.current.getBoundingClientRect();
         // 拖拽开始时锁定本次的边界，避免拖拽中容器宽度抖动
-        const bounds = computeRatioBounds(rect.width, PREVIEW_MIN_PX_BY_DEVICE[previewDevice]);
+        const bounds = computeRatioBounds(rect.width);
 
         const applyClientX = (clientX: number) => {
             const x = clientX - rect.left;
@@ -711,7 +720,7 @@ export default function App() {
         window.addEventListener('pointermove', onMove);
         window.addEventListener('pointerup', onUp);
         window.addEventListener('pointercancel', onUp);
-    }, [previewDevice, editorOnRight]);
+    }, [editorOnRight]);
 
     const toggleTheme = () => {
         setThemeMode((prev) => {
@@ -722,39 +731,20 @@ export default function App() {
         });
     };
 
-    const applyAiMarkdown = (markdown: string, mode: AiApplyMode) => {
+    const applyAiMarkdown = (markdown: string) => {
         const previousDocument = markaDocument;
         const previousAiState = hasAiGeneratedContent;
-        const textarea = editorScrollRef.current;
-        const result = applyMarkdownResult(
-            markaDocument,
-            markdown,
-            mode,
-            textarea ? { start: textarea.selectionStart, end: textarea.selectionEnd } : undefined,
-        );
+        const document = createMarkdownDocument(markdown);
 
-        setMarkaDocument(result.document);
-        setHasAiGeneratedContent(Boolean(result.document.source.trim()));
+        setMarkaDocument(document);
+        setHasAiGeneratedContent(Boolean(document.source.trim()));
 
-        if (result.cursor !== null && textarea) {
-            const cursor = result.cursor;
-            setTimeout(() => {
-                textarea.focus();
-                textarea.setSelectionRange(cursor, cursor);
-            }, 0);
-        }
-
-        const modeLabel = result.effectiveMode === 'replace'
-            ? '已替换当前内容'
-            : result.effectiveMode === 'insert'
-                ? '已插入到光标处'
-                : '已追加到末尾';
-        showNotice('AI Markdown 已应用', modeLabel, 'success', {
+        showNotice('AI Markdown 已生成', '已生成到编辑区', 'success', {
             actionLabel: '撤销',
             onAction: () => {
                 setMarkaDocument(previousDocument);
                 setHasAiGeneratedContent(previousAiState);
-                showNotice('已撤销', '已恢复 AI 应用前的内容', 'success');
+                showNotice('已撤销', '已恢复生成前内容', 'success');
             },
         });
     };
@@ -774,15 +764,16 @@ export default function App() {
     }, [showNotice]);
 
     const handleThemeChange = useCallback((themeId: string) => {
+        if (usesSourceDeclaredTheme) return;
         if (themeId === activeTheme) return;
         setActiveTheme(themeId);
-    }, [activeTheme]);
+    }, [activeTheme, usesSourceDeclaredTheme]);
 
     useEffect(() => {
         // 流式生成时编辑区直接显示后端增量，预览在结束或中止后一次追平。
         if (isAiStreaming) return;
 
-        setRenderedHtml(renderMarkaDocumentPreview(markaDocument, activeTheme));
+        setPreviewArtifact(renderMarkaDocumentArtifact(markaDocument, activeTheme));
     }, [markaDocument, activeTheme, isAiStreaming]);
 
     useEffect(() => {
@@ -802,22 +793,8 @@ export default function App() {
         sourcePanel: 'editor' | 'preview',
         updateTarget: (ratio: number) => void,
     ) => {
-        if (!scrollSyncEnabled) return;
-        if (scrollSyncLockRef.current && scrollSyncLockRef.current !== sourcePanel) return;
-
-        scrollSyncLockRef.current = sourcePanel;
-        updateTarget(Math.min(1, Math.max(0, scrollRatio)));
-
-        if (scrollLockReleaseTimeoutRef.current) {
-            clearTimeout(scrollLockReleaseTimeoutRef.current);
-        }
-
-        scrollLockReleaseTimeoutRef.current = setTimeout(() => {
-            if (scrollSyncLockRef.current === sourcePanel) {
-                scrollSyncLockRef.current = null;
-            }
-            scrollLockReleaseTimeoutRef.current = null;
-        }, 50);
+        if (!canSyncScroll || !scrollSyncEnabled) return;
+        scrollSyncControllerRef.current.synchronize(sourcePanel, scrollRatio, updateTarget);
     };
 
     const handleEditorScroll = () => {
@@ -859,18 +836,12 @@ export default function App() {
         ? requestClearEditor
         : undefined;
     const editorAbortAction = isAiStreaming ? abortAiStream : undefined;
-    const handleRegenerateStream = useCallback(() => {
-        abortAiStream();
-        setAiMainTextStarted(false);
-        setAiMarkdownOpen(true);
-    }, [abortAiStream]);
-
     const handleCopy = async () => {
         if (!documentSource.trim()) {
             showNotice('内容为空', '请先输入内容再复制', 'error');
             return;
         }
-        if (documentDefinition.capabilities.sourceLocation && !previewRef.current) return;
+        if (sourceLocationAvailability.state === 'enabled' && !previewRef.current) return;
         setIsCopying(true);
         try {
             const payload = await buildMarkaClipboardPayload(markaDocument, renderedHtml, activeTheme);
@@ -955,7 +926,7 @@ export default function App() {
 
     // Word 导出：HTML 伪装成 .doc，MIME 用 application/msword，直接复制自 lengyi-markdown-editor 的 exportWord
     const handleExportDoc = async () => {
-        if (!documentDefinition.capabilities.wordExport) return;
+        if (wordExportAvailability.state !== 'enabled') return;
         try {
             const exportHtml = getMarkaDocumentExportHtml(markaDocument, renderedHtml);
             const blob = buildDocBlob(exportHtml, `Marka_Article_${Date.now()}`);
@@ -1179,11 +1150,10 @@ export default function App() {
         onSourceChange: setDocumentSource,
         editorScrollRef,
         onEditorScroll: handleEditorScroll,
-        scrollSyncEnabled,
+        scrollSyncEnabled: canSyncScroll && scrollSyncEnabled,
         onSelectAll: isAiStreaming || editorClearAction ? undefined : handleSelectAll,
         onClearRequest: editorClearAction,
         onAbortStream: editorAbortAction,
-        onRegenerateStream: (isAiStreaming || hasAiGeneratedContent) ? handleRegenerateStream : undefined,
         immersive: isImmersive,
         aiThinking,
         isAiThinkingExpanded,
@@ -1198,17 +1168,16 @@ export default function App() {
     };
 
     const previewPanelProps = {
-        renderedHtml,
+        previewArtifact,
         deviceWidthClass,
         previewDevice,
         previewRef,
         surfaceRef: previewSurfaceRef,
         onScrollRatio: handlePreviewScroll,
         onPreviewZoom: handleHtmlPreviewZoom,
-        scrollSyncEnabled: documentDefinition.capabilities.scrollSync && scrollSyncEnabled,
-        onImageClick: documentDefinition.capabilities.sourceLocation ? handleImageClick : undefined,
+        scrollSyncEnabled: canSyncScroll && scrollSyncEnabled,
+        onImageClick: sourceLocationAvailability.state === 'enabled' ? handleImageClick : undefined,
         zoom: previewZoom,
-        documentKind: markaDocument.kind,
     };
 
     const appContent = (
@@ -1261,8 +1230,8 @@ export default function App() {
                 <ThemeSelector
                     activeTheme={activeTheme}
                     onThemeChange={handleThemeChange}
-                    disabled={!documentDefinition.capabilities.themes}
-                    disabledReason={`${documentDefinition.label} 文档保留原始样式，无法切换排版风格`}
+                    disabled={themeSelectionDisabled}
+                    disabledReason={themeSelectionDisabledReason}
                 />
                 <DesktopToolbar
                     previewDevice={previewDevice}
@@ -1306,8 +1275,8 @@ export default function App() {
                         onThemeChange={handleThemeChange}
                         mobile
                         compact={toolbarCompact}
-                        disabled={!documentDefinition.capabilities.themes}
-                        disabledReason={`${documentDefinition.label} 文档保留原始样式，无法切换排版风格`}
+                        disabled={themeSelectionDisabled}
+                        disabledReason={themeSelectionDisabledReason}
                     />
                     <MobileToolbar
                         onExportPdf={handleExportPdf}
@@ -1359,7 +1328,7 @@ export default function App() {
                                         initial={false}
                                         animate={{ width: previewTargetWidth }}
                                         transition={isDraggingDivider ? { duration: 0 } : { duration: 0.4, ease: [0.32, 0.72, 0, 1] }}
-                                        className="flex flex-col overflow-hidden relative"
+                                        className="flex min-w-0 flex-col overflow-hidden relative"
                                         style={{ flex: '0 0 auto' }}
                                         onMouseEnter={() => setActiveZoomRegion('preview')}
                                         onFocusCapture={() => setActiveZoomRegion('preview')}
@@ -1380,7 +1349,7 @@ export default function App() {
                                         initial={false}
                                         animate={{ width: editorTargetWidth }}
                                         transition={isDraggingDivider ? { duration: 0 } : { duration: 0.4, ease: [0.32, 0.72, 0, 1] }}
-                                        className="flex flex-col overflow-hidden relative"
+                                        className="flex min-w-0 flex-col overflow-hidden relative"
                                         style={{ flex: '0 0 auto' }}
                                         onMouseEnter={() => setActiveZoomRegion('editor')}
                                         onFocusCapture={() => setActiveZoomRegion('editor')}
@@ -1395,7 +1364,7 @@ export default function App() {
                                         initial={false}
                                         animate={{ width: editorTargetWidth }}
                                         transition={isDraggingDivider ? { duration: 0 } : { duration: 0.4, ease: [0.32, 0.72, 0, 1] }}
-                                        className="flex flex-col overflow-hidden relative"
+                                        className="flex min-w-0 flex-col overflow-hidden relative"
                                         style={{ flex: '0 0 auto' }}
                                         onMouseEnter={() => setActiveZoomRegion('editor')}
                                         onFocusCapture={() => setActiveZoomRegion('editor')}
@@ -1416,7 +1385,7 @@ export default function App() {
                                         initial={false}
                                         animate={{ width: previewTargetWidth }}
                                         transition={isDraggingDivider ? { duration: 0 } : { duration: 0.4, ease: [0.32, 0.72, 0, 1] }}
-                                        className="flex flex-col overflow-hidden relative"
+                                        className="flex min-w-0 flex-col overflow-hidden relative"
                                         style={{ flex: '0 0 auto' }}
                                         onMouseEnter={() => setActiveZoomRegion('preview')}
                                         onFocusCapture={() => setActiveZoomRegion('preview')}
@@ -1499,7 +1468,6 @@ export default function App() {
             <AiMarkdownDialog
                 isOpen={aiMarkdownOpen}
                 isDesktop={isDesktop}
-                currentMarkdown={getMarkdownSource(markaDocument)}
                 onClose={() => setAiMarkdownOpen(false)}
                 onApply={applyAiMarkdown}
                 onStreamOutput={(text) => {
@@ -1602,31 +1570,16 @@ export default function App() {
         const embedUrl = new URL(window.location.href);
         embedUrl.searchParams.delete('mobile');
         embedUrl.searchParams.set('embed', '1');
-        const mobileScreen = DEVICE_FRAME_SIZE.mobile;
-        const mobilePadding = DEVICE_FRAME_PADDING.mobile;
         return (
             <div className="fixed inset-0 bg-[#1d1d1f] flex items-center justify-center overflow-hidden">
-                <div
-                    className="relative bg-black rounded-[44px] shadow-2xl flex-shrink-0"
-                    style={{
-                        width: mobileScreen.width + mobilePadding * 2,
-                        height: mobileScreen.height + mobilePadding * 2,
-                        padding: mobilePadding,
-                    }}
-                >
-                    <div className="absolute top-2 left-1/2 -translate-x-1/2 w-28 h-7 bg-black rounded-b-2xl z-50" />
-                    <div
-                        className="w-full h-full rounded-[36px] overflow-hidden"
+                <DeviceFrame device="mobile">
+                    <iframe
+                        src={embedUrl.toString()}
+                        className="block w-full h-full border-none"
                         style={{ background: '#fbfbfd' }}
-                    >
-                        <iframe
-                            src={embedUrl.toString()}
-                            className="block w-full h-full border-none"
-                            style={{ background: '#fbfbfd' }}
-                            allow="clipboard-write; clipboard-read"
-                        />
-                    </div>
-                </div>
+                        allow="clipboard-write; clipboard-read"
+                    />
+                </DeviceFrame>
             </div>
         );
     }

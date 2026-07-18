@@ -1,7 +1,5 @@
 import type { AiFormattingPresetId } from './aiFormattingPresets';
 
-export type AiApplyMode = 'replace' | 'insert' | 'append';
-export type AiMarkdownTask = 'generate' | 'revise' | 'continue';
 export type AiMarkdownModel = string;
 export type AiReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
 export type AiMarkdownSpeed = 'standard' | 'fast';
@@ -83,7 +81,6 @@ export interface AiMarkdownRequest {
     model: AiMarkdownModel;
     reasoningEffort: AiReasoningEffort;
     speed: AiMarkdownSpeed;
-    task: AiMarkdownTask;
     sourceText: string;
     extraInstruction: string;
 }

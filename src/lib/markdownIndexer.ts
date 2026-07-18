@@ -41,9 +41,13 @@ export function markElementIndexes(html: string): string {
   // Get all body children to traverse in document order
   const bodyChildren = Array.from(doc.body.children);
 
-  // Check if there's only one container div (common pattern from applyTheme)
+  // Check if there is only one presentation container. Both the standard
+  // Markdown theme and R-Markdown's own document presentation use one.
   let elementsToMark: Element[];
-  if (bodyChildren.length === 1 && bodyChildren[0].tagName.toLowerCase() === 'div') {
+  if (bodyChildren.length === 1 && (
+    bodyChildren[0].tagName.toLowerCase() === 'div'
+    || bodyChildren[0].hasAttribute('data-rmarkdown-document')
+  )) {
     // Unwrap the container div and mark its children
     const container = bodyChildren[0];
     elementsToMark = Array.from(container.children);

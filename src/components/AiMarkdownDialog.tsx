@@ -13,34 +13,26 @@ import {
     aiReasoningEfforts,
     cleanAiMarkdown,
     streamAiMarkdown,
-    type AiApplyMode,
     type AiGenerationPhase,
     type AiMarkdownModel,
     type AiMarkdownModelOption,
-    type AiMarkdownTask,
     type AiMarkdownSpeed,
     type AiReasoningEffort,
 } from '../lib/aiMarkdown';
 import {
-    AI_FORMATTING_PRESET_STORAGE_KEY,
     DEFAULT_AI_FORMATTING_PRESET,
-    aiFormattingPresets,
-    getAiFormattingPreset,
-    isAiFormattingPresetId,
-    type AiFormattingPresetId,
 } from '../lib/aiFormattingPresets';
-import { ZHOUZUOLUO_PROMPT } from '../lib/prompts/zhouZuoluo';
 import { readClipboardText } from '../lib/clipboard';
 import { removeMarkdownFormatting } from '../lib/markdownUtils';
-import { mapRenderedPointToSource } from '../lib/promptCaret';
 import { ModelIcon } from '../lib/modelIcons';
+import { mapRenderedPointToSource } from '../lib/promptCaret';
+import { ZHOUZUOLUO_PROMPT } from '../lib/prompts/zhouZuoluo';
 
 interface AiMarkdownDialogProps {
     isOpen: boolean;
     isDesktop: boolean;
-    currentMarkdown: string;
     onClose: () => void;
-    onApply: (markdown: string, mode: AiApplyMode) => void;
+    onApply: (markdown: string) => void;
     onStreamOutput?: (text: string) => void;
     onThinkingDelta?: (delta: string) => void;
     onGenerationPhaseChange?: (phase: AiGenerationPhase, abort?: () => void) => void;
@@ -60,27 +52,15 @@ const promptSurfaceClass = 'rounded-md bg-white px-3 py-2.5 text-[13px] leading-
 const promptFieldClass = `w-full resize-none placeholder-[#9a9aa0] focus-visible:shadow-[inset_0_0_0_1px_#0a84ff] disabled:opacity-70 ${promptSurfaceClass}`;
 const promptOverlayClass = `absolute inset-0 overflow-auto ${promptSurfaceClass} [&_*]:text-[inherit] [&_*]:leading-[inherit] [&_h1]:my-0 [&_h1]:text-[15px] [&_h1]:font-bold [&_h2]:my-0 [&_h2]:text-[14px] [&_h2]:font-semibold [&_h3]:my-0 [&_h3]:font-semibold [&_p]:my-0 [&_ul]:my-0 [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:my-0 [&_ol]:list-decimal [&_ol]:pl-4 [&_li]:my-0 [&_blockquote]:my-0 [&_blockquote]:border-l-2 [&_blockquote]:border-[#d0d7de] [&_blockquote]:pl-2 [&_pre]:my-0 [&_pre]:overflow-auto [&_pre]:rounded [&_pre]:bg-[#f5f5f7] [&_pre]:p-2 dark:[&_pre]:bg-[#262628] [&_code]:font-inherit`;
 
-function getInitialFormattingPreset(): AiFormattingPresetId {
-    try {
-        const stored = window.localStorage.getItem(AI_FORMATTING_PRESET_STORAGE_KEY);
-        return isAiFormattingPresetId(stored) ? stored : DEFAULT_AI_FORMATTING_PRESET;
-    } catch {
-        return DEFAULT_AI_FORMATTING_PRESET;
-    }
-}
-
 export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
-    const { isOpen, isDesktop, currentMarkdown, onClose, onApply, onStreamOutput, onThinkingDelta, onGenerationPhaseChange, showNotice } = props;
-    const [formattingPresetId, setFormattingPresetId] = useState<AiFormattingPresetId>(getInitialFormattingPreset);
+    const { isOpen, isDesktop, onClose, onApply, onStreamOutput, onThinkingDelta, onGenerationPhaseChange, showNotice } = props;
     const [model, setModel] = useState<AiMarkdownModel>(DEFAULT_AI_MARKDOWN_MODEL);
     const [reasoningEffort, setReasoningEffort] = useState<AiReasoningEffort>(DEFAULT_AI_REASONING_EFFORT);
     const [speed, setSpeed] = useState<AiMarkdownSpeed>(DEFAULT_AI_MARKDOWN_SPEED);
     const [hasSourceText, setHasSourceText] = useState(false);
     const [extraInstruction, setExtraInstruction] = useState('');
-    const applyMode: AiApplyMode = 'replace';
-    const [confirmingReplace, setConfirmingReplace] = useState(false);
-    const [presetMenuOpen, setPresetMenuOpen] = useState(false);
-    const [copiedFields, setCopiedFields] = useState({ source: false, extra: false });
+    const [copiedSource, setCopiedSource] = useState(false);
+    const [copiedExtra, setCopiedExtra] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [settingsSubmenu, setSettingsSubmenu] = useState<null | 'model' | 'speed'>(null);
     const [settingsSubmenuOffset, setSettingsSubmenuOffset] = useState(-10);
@@ -93,7 +73,6 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
 
     const abortRef = useRef<AbortController | null>(null);
     const isStreamingRef = useRef(false);
-    const presetDetailsRef = useRef<HTMLDivElement>(null);
     const settingsDetailsRef = useRef<HTMLDivElement>(null);
     const sourceTextRef = useRef('');
     const sourceLengthRef = useRef<HTMLSpanElement>(null);
@@ -110,11 +89,9 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
     useEffect(() => {
         if (!isOpen) {
             if (!isStreamingRef.current) abortRef.current?.abort();
-            setConfirmingReplace(false);
             setSettingsOpen(false);
             setSettingsSubmenu(null);
             setSettingsSubmenuOffset(-10);
-            setPresetMenuOpen(false);
             setIsFullscreen(false);
             setSheetHeight(88);
             setIsPromptRendered(false);
@@ -200,7 +177,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
             showNotice('粘贴失败', '未获得剪贴板权限或剪贴板为空', 'error');
             return;
         }
-        setExtraInstruction(prev => prev ? `${prev}\n${text}` : text);
+        setExtraInstruction(current => current ? `${current}\n${text}` : text);
         showNotice('已粘贴', '剪贴板内容已粘贴到补充要求', 'success');
     }, [showNotice]);
 
@@ -216,14 +193,14 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
         showNotice('已清除', '补充要求已清空', 'success');
     }, [showNotice, syncPromptScroll]);
 
-    const handleExampleClick = useCallback(() => {
+    const applyExtraInstructionExample = useCallback(() => {
         setExtraInstruction(ZHOUZUOLUO_PROMPT);
         setIsPromptRendered(true);
         syncPromptScroll(0);
     }, [syncPromptScroll]);
 
     const clearExtraFormatting = useCallback(() => {
-        setExtraInstruction(prev => removeMarkdownFormatting(prev));
+        setExtraInstruction(current => removeMarkdownFormatting(current));
         showNotice('已清除格式', '已移除所有格式标记，仅保留纯文本', 'success');
     }, [showNotice]);
 
@@ -284,18 +261,32 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
         window.addEventListener('pointercancel', onUp);
     }, [sheetHeight, isFullscreen]);
 
-    const copyField = useCallback(async (key: 'source' | 'extra', text: string) => {
-        if (copiedFields[key] || !text) return;
+    const copySourceText = useCallback(async () => {
+        const text = sourceTextareaRef.current?.value ?? sourceTextRef.current;
+        if (copiedSource || !text) return;
         try {
             await navigator.clipboard.writeText(text);
-            setCopiedFields(prev => ({ ...prev, [key]: true }));
+            setCopiedSource(true);
             window.setTimeout(() => {
-                setCopiedFields(prev => ({ ...prev, [key]: false }));
+                setCopiedSource(false);
             }, 2000);
         } catch {
             showNotice('复制失败', '无法写入剪贴板', 'error');
         }
-    }, [copiedFields, showNotice]);
+    }, [copiedSource, showNotice]);
+
+    const copyExtraInstruction = useCallback(async () => {
+        if (copiedExtra || !extraInstruction) return;
+        try {
+            await navigator.clipboard.writeText(extraInstruction);
+            setCopiedExtra(true);
+            window.setTimeout(() => {
+                setCopiedExtra(false);
+            }, 2000);
+        } catch {
+            showNotice('复制失败', '无法写入剪贴板', 'error');
+        }
+    }, [copiedExtra, extraInstruction, showNotice]);
 
     useEffect(() => {
         if (isPromptRendered && promptOverlayRef.current) {
@@ -305,7 +296,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
         }
     }, [isPromptRendered]);
 
-    const run = useCallback(async (task: AiMarkdownTask, nextApplyMode: AiApplyMode) => {
+    const generate = useCallback(async () => {
         const text = sourceTextareaRef.current?.value ?? sourceTextRef.current;
         const instruction = extraInstruction;
 
@@ -365,7 +356,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
         try {
             startConnectionGate();
             const markdown = await streamAiMarkdown(
-                { presetId: formattingPresetId, model, reasoningEffort, speed, task, sourceText: text, extraInstruction: instruction },
+                { presetId: DEFAULT_AI_FORMATTING_PRESET, model, reasoningEffort, speed, sourceText: text, extraInstruction: instruction },
                 {
                     signal: controller.signal,
                     onThinkingDelta: (delta) => {
@@ -388,7 +379,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                 onStreamOutput?.(receivedText);
             }
             if (controller.signal.aborted) throw new DOMException('Aborted', 'AbortError');
-            onApply(cleaned, nextApplyMode);
+            onApply(cleaned);
             setPhase('completed');
         } catch (err) {
             cancelConnectionGate();
@@ -401,110 +392,30 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                 isStreamingRef.current = false;
             }
         }
-    }, [extraInstruction, formattingPresetId, model, onApply, onClose, onStreamOutput, onThinkingDelta, onGenerationPhaseChange, reasoningEffort, showNotice, speed]);
+    }, [extraInstruction, model, onApply, onClose, onStreamOutput, onThinkingDelta, onGenerationPhaseChange, reasoningEffort, showNotice, speed]);
 
-    const askConfirm = useCallback(() => {
-        if (!canGenerate) return;
-        if (!currentMarkdown.trim()) {
-            run('generate', applyMode);
-            return;
-        }
-        setConfirmingReplace(true);
-    }, [canGenerate, currentMarkdown, applyMode, run]);
-
-    const changeFormattingPreset = (nextPresetId: AiFormattingPresetId) => {
-        setFormattingPresetId(nextPresetId);
-        setPresetMenuOpen(false);
-        try {
-            window.localStorage.setItem(AI_FORMATTING_PRESET_STORAGE_KEY, nextPresetId);
-        } catch {
-            // The in-memory selection still works when storage is unavailable.
-        }
-    };
-
-    const renderFormattingPresetControl = (mobile = false) => {
-        const selectedPreset = getAiFormattingPreset(formattingPresetId);
-
-        return (
-            <div
-                ref={presetDetailsRef}
-                className="relative shrink-0"
-                onBlur={(event) => {
-                    const nextFocus = event.relatedTarget;
-                    if (!(nextFocus instanceof Node) || !event.currentTarget.contains(nextFocus)) {
-                        setPresetMenuOpen(false);
-                    }
-                }}
-                onKeyDown={(event) => {
-                    if (event.key === 'Escape') {
-                        setPresetMenuOpen(false);
-                        event.stopPropagation();
-                    }
-                }}
+    const renderFormattingPresetControl = (mobile = false) => (
+        <div
+            className="inline-flex h-7 items-center rounded-full bg-[#f0f1f4] p-0.5 dark:bg-[#2c2c2e]"
+            role="radiogroup"
+            aria-label="输出格式"
+        >
+            <label
+                data-testid="ai-formatting-preset-rmarkdown"
+                className={`inline-flex h-6 cursor-not-allowed items-center whitespace-nowrap rounded-full bg-white px-2 font-semibold text-[#1d1d1f] shadow-[0_1px_3px_rgba(0,0,0,0.08)] dark:bg-[#3a3a3c] dark:text-[#f5f5f7] ${mobile ? 'text-[12px]' : 'text-[11px]'}`}
             >
-                <div className="inline-flex h-7 items-center rounded-full bg-[#f0f1f4] p-0.5 dark:bg-[#2c2c2e]">
-                    <span className={`whitespace-nowrap px-2 font-medium text-[#717178] dark:text-[#a1a1a6] ${mobile ? 'text-[12px]' : 'text-[11px]'}`}>
-                        排版方案
-                    </span>
-                    <button
-                        type="button"
-                        data-testid="ai-formatting-preset-trigger"
-                        aria-label={`选择排版方案，当前为${selectedPreset.label}`}
-                        aria-haspopup="menu"
-                        aria-expanded={presetMenuOpen}
-                        onClick={() => {
-                            setSettingsOpen(false);
-                            setSettingsSubmenu(null);
-                            setPresetMenuOpen(open => !open);
-                        }}
-                        className={`inline-flex h-6 items-center gap-1 whitespace-nowrap rounded-full bg-white px-2 font-semibold text-[#1d1d1f] shadow-[0_1px_3px_rgba(0,0,0,0.08)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 dark:bg-[#3a3a3c] dark:text-[#f5f5f7] dark:shadow-[0_1px_3px_rgba(0,0,0,0.24)] ${mobile ? 'text-[12px]' : 'text-[11px]'}`}
-                    >
-                        {selectedPreset.shortLabel}
-                        <ChevronDown
-                            size={11}
-                            className={`text-[#717178] transition-transform duration-200 dark:text-[#b8b8bd] ${presetMenuOpen ? 'rotate-180' : ''}`}
-                        />
-                    </button>
-                </div>
-                <AnimatePresence initial={false}>
-                    {presetMenuOpen && (
-                        <motion.div
-                            data-testid="ai-formatting-preset-menu"
-                            role="menu"
-                            initial={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: -6, scale: 0.985 }}
-                            animate={prefersReducedMotion ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
-                            exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: -6, scale: 0.985 }}
-                            transition={{ duration: prefersReducedMotion ? 0.1 : 0.16, ease: [0.25, 0.1, 0.25, 1] }}
-                            className={`absolute left-0 top-9 z-[255] w-[286px] max-w-[calc(100vw-32px)] rounded-xl bg-white p-1.5 text-[#1d1d1f] shadow-[0_18px_46px_rgba(15,23,42,0.2)] dark:bg-[#2d2d2f] dark:text-[#f5f5f7] dark:shadow-[0_18px_46px_rgba(0,0,0,0.36)] ${mobile ? '-translate-x-16' : ''}`}
-                        >
-                            {aiFormattingPresets.map(preset => {
-                                const selected = preset.id === formattingPresetId;
-                                return (
-                                    <button
-                                        key={preset.id}
-                                        type="button"
-                                        role="menuitemradio"
-                                        aria-checked={selected}
-                                        data-testid={`ai-formatting-preset-${preset.id}`}
-                                        onClick={() => changeFormattingPreset(preset.id)}
-                                        className={`flex w-full items-start justify-between gap-3 rounded-lg px-2.5 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 ${selected ? 'bg-[#e7f2ff] text-[#006acb] dark:bg-[#0a84ff]/18 dark:text-[#8fc5ff]' : 'hover:bg-black/[0.05] dark:hover:bg-white/[0.08]'}`}
-                                    >
-                                        <span className="min-w-0">
-                                            <span className="block text-[12px] font-semibold leading-5">{preset.label}</span>
-                                            <span className={`block text-[11px] leading-4 ${selected ? 'text-[#326b9f] dark:text-[#9bc4eb]' : 'text-[#717178] dark:text-[#a1a1a6]'}`}>
-                                                {preset.description}
-                                            </span>
-                                        </span>
-                                        {selected && <Check size={13} className="mt-1 shrink-0" />}
-                                    </button>
-                                );
-                            })}
-                        </motion.div>
-                    )}
-                </AnimatePresence>
-            </div>
-        );
-    };
+                <input
+                    type="radio"
+                    name="ai-formatting-preset"
+                    checked
+                    disabled
+                    readOnly
+                    className="sr-only"
+                />
+                R-Markdown
+            </label>
+        </div>
+    );
 
     const closeSettingsMenu = () => {
         setSettingsOpen(false);
@@ -535,7 +446,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
     ) => (nextId: T['id']) => {
         const item = options.find(option => option.id === nextId);
         if (!item) {
-            showNotice('修改失败', `未找到对应的${name}配置`, 'error');
+            showNotice('切换失败', `未找到对应的${name}配置`, 'error');
             return;
         }
         if (currentId === item.id) {
@@ -544,7 +455,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
         }
         set(item.id);
         closeSettingsMenu();
-        showNotice('修改成功', `${name}已切换为 ${item.label}`, 'success');
+        showNotice('已切换', `${name}已切换为 ${item.label}`, 'success');
     };
 
     const changeReasoningEffort = selectSetting(aiReasoningEfforts, reasoningEffort, setReasoningEffort, '推理等级');
@@ -569,47 +480,6 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
             textarea.scrollTop = scrollTop;
         });
     }, [extraInstruction]);
-
-    const renderPromptField = (mobile: boolean) => (
-        <div className={mobile ? 'relative flex min-h-0 flex-1 flex-col' : 'relative min-h-0 flex-1'}>
-            <textarea
-                ref={promptTextareaRef}
-                data-testid="ai-extra-instruction"
-                value={extraInstruction}
-                onChange={(e) => setExtraInstruction(e.target.value)}
-                onScroll={(e) => syncPromptScroll(e.currentTarget.scrollTop)}
-                onFocus={() => setIsPromptRendered(false)}
-                onBlur={(e) => {
-                    syncPromptScroll(e.currentTarget.scrollTop);
-                    if (extraInstruction.trim()) setIsPromptRendered(true);
-                }}
-                className={`${promptFieldClass} ${mobile ? 'h-full min-h-[72px] flex-1' : 'h-full min-h-[160px] flex-1'} ${isPromptRendered && extraInstruction ? 'text-transparent caret-transparent' : ''}`}
-                placeholder=""
-                />
-            {isPromptRendered && extraInstruction && (
-                <div
-                    ref={promptOverlayRef}
-                    aria-hidden="true"
-                    onPointerDown={handlePromptOverlayPointerDown}
-                    onScroll={(event) => { promptScrollTopRef.current = event.currentTarget.scrollTop; }}
-                    className={promptOverlayClass}
-                    dangerouslySetInnerHTML={{ __html: md.render(extraInstruction) }}
-                />
-            )}
-            {!extraInstruction && (
-                <div className="pointer-events-none absolute left-3 top-2.5 flex flex-wrap items-center gap-1 text-[13px] text-[#9a9aa0]">
-                    <span>例如：重点突出实操步骤，整体表达简洁</span>
-                    <button
-                        type="button"
-                        onClick={handleExampleClick}
-                        className={`pointer-events-auto inline-flex items-center rounded-[4px] bg-[#eef0f4] px-1.5 py-0.5 text-[11px] font-medium text-[#4b5563] transition-colors active:scale-95 dark:bg-[#2c2c2e] dark:text-[#d1d1d6] ${mobile ? 'active:bg-[#e4e7ec] dark:active:bg-[#3a3a3c]' : 'hover:bg-[#e4e7ec] dark:hover:bg-[#3a3a3c]'}`}
-                    >
-                        示例
-                    </button>
-                </div>
-            )}
-        </div>
-    );
 
     const renderSettingsControl = ({ mobile = false }: { mobile?: boolean } = {}) => {
         const selectedModel = modelOptions.find(item => item.id === model) ?? modelOptions[0] ?? aiMarkdownModels[0];
@@ -778,12 +648,54 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
         return (
             <>
                 <button onClick={onClose} className={gb}>取消</button>
-                <button onClick={askConfirm} disabled={!canGenerate} className={pb}>
+                <button onClick={() => void generate()} disabled={!canGenerate} className={pb}>
                     生成 Markdown
                 </button>
             </>
         );
     };
+
+    const renderPromptField = (mobile: boolean) => (
+        <div className={mobile ? 'relative flex min-h-0 flex-1 flex-col' : 'relative min-h-0 flex-1'}>
+            <textarea
+                ref={promptTextareaRef}
+                data-testid="ai-extra-instruction"
+                aria-label="补充要求"
+                value={extraInstruction}
+                onChange={(event) => setExtraInstruction(event.target.value)}
+                onScroll={(event) => syncPromptScroll(event.currentTarget.scrollTop)}
+                onFocus={() => setIsPromptRendered(false)}
+                onBlur={(event) => {
+                    syncPromptScroll(event.currentTarget.scrollTop);
+                    if (extraInstruction.trim()) setIsPromptRendered(true);
+                }}
+                className={`${promptFieldClass} ${mobile ? 'h-full min-h-[104px] flex-1' : 'h-full min-h-[160px] flex-1'} ${isPromptRendered && extraInstruction ? 'text-transparent caret-transparent' : ''}`}
+                placeholder=""
+            />
+            {isPromptRendered && extraInstruction && (
+                <div
+                    ref={promptOverlayRef}
+                    aria-hidden="true"
+                    onPointerDown={handlePromptOverlayPointerDown}
+                    onScroll={(event) => { promptScrollTopRef.current = event.currentTarget.scrollTop; }}
+                    className={promptOverlayClass}
+                    dangerouslySetInnerHTML={{ __html: md.render(extraInstruction) }}
+                />
+            )}
+            {!extraInstruction && (
+                <div className="pointer-events-none absolute left-3 top-2.5 flex flex-wrap items-center gap-1 text-[13px] text-[#9a9aa0]">
+                    <span>例如：重点突出实操步骤，整体表达简洁</span>
+                    <button
+                        type="button"
+                        onClick={applyExtraInstructionExample}
+                        className="pointer-events-auto rounded px-1 text-[12px] font-medium text-[#0a84ff] transition-colors hover:bg-[#0a84ff]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 dark:text-[#64aaff]"
+                    >
+                        示例
+                    </button>
+                </div>
+            )}
+        </div>
+    );
 
     const renderInputPane = (mobile: boolean) => {
         const fb = mobile ? compactFieldButton : desktopFieldButton;
@@ -801,11 +713,11 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                             <button
                                 type="button"
                                 aria-label="复制纯文本内容"
-                                disabled={copiedFields.source || !hasSourceText}
-                                onClick={() => void copyField('source', sourceTextareaRef.current?.value ?? sourceTextRef.current)}
+                                disabled={copiedSource || !hasSourceText}
+                                onClick={() => void copySourceText()}
                                 className={iconButton}
                             >
-                                {copiedFields.source ? <Check size={11} className="text-[#008847] dark:text-[#5de086]" /> : <Copy size={11} />}
+                                {copiedSource ? <Check size={11} className="text-[#008847] dark:text-[#5de086]" /> : <Copy size={11} />}
                             </button>
                             <span ref={sourceLengthRef} className="text-[11px] text-[#86868b] dark:text-[#8e8e93]">{sourceTextRef.current.length} 字</span>
                         </span>
@@ -859,11 +771,11 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                             <button
                                 type="button"
                                 aria-label="复制补充要求"
-                                disabled={copiedFields.extra || !extraInstruction}
-                                onClick={() => void copyField('extra', extraInstruction)}
+                                disabled={copiedExtra || !extraInstruction}
+                                onClick={() => void copyExtraInstruction()}
                                 className={iconButton}
                             >
-                                {copiedFields.extra ? <Check size={11} className="text-[#008847] dark:text-[#5de086]" /> : <Copy size={11} />}
+                                {copiedExtra ? <Check size={11} className="text-[#008847] dark:text-[#5de086]" /> : <Copy size={11} />}
                             </button>
                             <span className="text-[11px] text-[#86868b] dark:text-[#8e8e93]">{extraInstruction.length} 字</span>
                         </span>
@@ -891,43 +803,6 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
             </section>
         );
     };
-
-    const confirmReplaceDialog = confirmingReplace && (
-        <motion.div
-            data-testid="ai-replace-confirm"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[230] grid place-items-center bg-black/18 px-5 backdrop-blur-[2px] dark:bg-black/34"
-            onClick={() => setConfirmingReplace(false)}
-        >
-            <motion.div
-                initial={{ opacity: 0, y: 8, scale: 0.98 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 8, scale: 0.98 }}
-                transition={{ duration: 0.16 }}
-                className="w-full max-w-[340px] rounded-lg bg-white p-4 shadow-[0_18px_50px_rgba(15,23,42,0.24)] dark:bg-[#242426]"
-                onClick={(event) => event.stopPropagation()}
-            >
-                <h3 className="text-[15px] font-semibold text-[#1d1d1f] dark:text-[#f5f5f7]">替换当前编辑区内容？</h3>
-                <p className="mt-2 text-[13px] leading-5 text-[#69707d] dark:text-[#a1a1a6]">
-                    AI 生成完成后会覆盖当前 Markdown，可通过成功提示里的撤销按钮恢复。
-                </p>
-                <div className="mt-4 flex justify-end gap-2">
-                    <button onClick={() => setConfirmingReplace(false)} className={ghostButton}>取消</button>
-                    <button
-                        onClick={() => {
-                            setConfirmingReplace(false);
-                            run('generate', applyMode);
-                        }}
-                        className={primaryButton}
-                    >
-                        确认生成
-                    </button>
-                </div>
-            </motion.div>
-        </motion.div>
-    );
 
     return createPortal(
         <>
@@ -1039,7 +914,6 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                             </footer>
                         </motion.div>
                     )}
-                        <AnimatePresence>{confirmReplaceDialog}</AnimatePresence>
                     </>
                 )}
             </AnimatePresence>

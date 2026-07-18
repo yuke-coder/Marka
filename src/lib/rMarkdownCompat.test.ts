@@ -45,7 +45,7 @@ describe('R-Markdown compatibility renderer', () => {
             '</compare>',
             '<cta label="START" title="开始" button="立即使用"></cta>',
             '<timeline>',
-            '- 2024年01月 | 启动 | 完成准备',
+            '- 2024年01月 | 启动 | 完成准备 | ![封面](https://example.com/cover.webp)[100% 120px]',
             '</timeline>',
             '<badges tone="green">React|Vite</badges>',
             '<statement>重要结论</statement>',
@@ -61,6 +61,8 @@ describe('R-Markdown compatibility renderer', () => {
         }
         expect(html).toContain('左侧内容');
         expect(html).toContain('2024年01月');
+        expect(html).toContain('data-rmarkdown-component="sized-image"');
+        expect(html).toContain('https://example.com/cover.webp');
     });
 
     it('keeps component-looking text in fenced code blocks as ordinary Markdown', () => {
@@ -68,5 +70,18 @@ describe('R-Markdown compatibility renderer', () => {
         expect(html).toContain('<markdown>```html');
         expect(html).toContain('<steps>example</steps>');
         expect(html).not.toContain('data-rmarkdown-component="steps"');
+    });
+
+    it('shows unregistered component-shaped tags as content cards instead of raw source', () => {
+        const html = renderRMarkdown([
+            '<notice-box title="重要提醒">',
+            '里面仍可写 **Markdown**。',
+            '</notice-box>',
+        ].join('\n'), options);
+
+        expect(html).toContain('data-custom-markdown-component="notice-box"');
+        expect(html).toContain('重要提醒');
+        expect(html).toContain('<markdown>里面仍可写 **Markdown**。</markdown>');
+        expect(html).not.toContain('<notice-box');
     });
 });

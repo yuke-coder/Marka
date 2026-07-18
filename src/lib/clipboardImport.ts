@@ -11,6 +11,10 @@ export type ClipboardDocumentImport =
         readonly detectedFrom: 'plain-source' | 'rich-signature';
     };
 
+export type ClipboardHtmlSourceImport = Extract<ClipboardDocumentImport, {
+    readonly kind: 'html-source';
+}>;
+
 type ClipboardData = Pick<DataTransfer, 'getData' | 'files' | 'items'>;
 
 const FULL_HTML_DOCUMENT_RE = /(?:<!doctype\s+html|<html(?:\s|>))/i;
@@ -49,13 +53,16 @@ export function isHtmlSource(text: string): boolean {
     return tags.some((match) => HTML_SOURCE_TAGS.has(match[1].toLowerCase()));
 }
 
-export function detectClipboardDocumentImport(
-    clipboardData: ClipboardData,
-): ClipboardDocumentImport | null {
-    const htmlFile = getClipboardFiles(clipboardData).find(isHtmlFile);
-    if (htmlFile) return { kind: 'html-file', file: htmlFile };
-
-    const plainSource = clipboardData.getData('text/plain').trim();
+/**
+ * Classifies text read from either a paste event or the Clipboard API.
+ * Only explicit source or known publisher/skill signatures switch the document
+ * into native HTML mode; ordinary rich text remains available to Markdown paste.
+ */
+export function detectHtmlDocumentSource(
+    plainText: string,
+    richHtml: string,
+): ClipboardHtmlSourceImport | null {
+    const plainSource = plainText.trim();
     if (isHtmlSource(plainSource)) {
         return {
             kind: 'html-source',
@@ -64,14 +71,26 @@ export function detectClipboardDocumentImport(
         };
     }
 
-    const richHtml = clipboardData.getData('text/html').trim();
-    if (richHtml && (FULL_HTML_DOCUMENT_RE.test(richHtml) || HTML_FIDELITY_SIGNATURE_RE.test(richHtml))) {
+    const richSource = richHtml.trim();
+    if (richSource && (FULL_HTML_DOCUMENT_RE.test(richSource) || HTML_FIDELITY_SIGNATURE_RE.test(richSource))) {
         return {
             kind: 'html-source',
-            source: richHtml,
+            source: richSource,
             detectedFrom: 'rich-signature',
         };
     }
 
     return null;
+}
+
+export function detectClipboardDocumentImport(
+    clipboardData: ClipboardData,
+): ClipboardDocumentImport | null {
+    const htmlFile = getClipboardFiles(clipboardData).find(isHtmlFile);
+    if (htmlFile) return { kind: 'html-file', file: htmlFile };
+
+    return detectHtmlDocumentSource(
+        clipboardData.getData('text/plain'),
+        clipboardData.getData('text/html'),
+    );
 }

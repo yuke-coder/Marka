@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-    applyMarkdownResult,
     createHtmlDocument,
     createMarkdownDocument,
     getMarkaDocumentDefinition,
@@ -24,36 +23,18 @@ describe('MarkaDocument', () => {
         expect(getMarkdownSource(html)).toBe('');
     });
 
-    it('defines capabilities and file metadata centrally for both document kinds', () => {
+    it('defines immutable file metadata centrally for both document kinds', () => {
         expect(getMarkaDocumentDefinition('markdown')).toMatchObject({
             label: 'Markdown',
             fileExtension: '.md',
-            previewMode: 'themed',
-            capabilities: {
-                themes: true,
-                smartPaste: true,
-                scrollSync: true,
-                sourceLocation: true,
-                wordExport: true,
-                pdfExport: true,
-                htmlExport: true,
-                pngExport: true,
-            },
+            mimeType: 'text/markdown;charset=utf-8',
+            editorPlaceholder: '在这里输入 Markdown 内容...',
         });
         expect(getMarkaDocumentDefinition('html')).toMatchObject({
             label: 'HTML',
             fileExtension: '.html',
-            previewMode: 'isolated',
-            capabilities: {
-                themes: false,
-                smartPaste: false,
-                scrollSync: true,
-                sourceLocation: false,
-                wordExport: false,
-                pdfExport: false,
-                htmlExport: true,
-                pngExport: false,
-            },
+            mimeType: 'text/html;charset=utf-8',
+            editorPlaceholder: '在这里编辑 HTML 源码...',
         });
     });
 
@@ -80,28 +61,4 @@ describe('MarkaDocument', () => {
         });
     });
 
-    it('applies AI Markdown without ever creating a mixed HTML/Markdown document', () => {
-        const htmlResult = applyMarkdownResult(
-            createHtmlDocument('<section>HTML</section>'),
-            '# AI Markdown',
-            'append',
-        );
-        expect(htmlResult).toEqual({
-            document: createMarkdownDocument('# AI Markdown'),
-            effectiveMode: 'replace',
-            cursor: null,
-        });
-
-        const markdownResult = applyMarkdownResult(
-            createMarkdownDocument('Before After'),
-            '**middle**',
-            'insert',
-            { start: 7, end: 7 },
-        );
-        expect(markdownResult).toEqual({
-            document: createMarkdownDocument('Before **middle**After'),
-            effectiveMode: 'insert',
-            cursor: 17,
-        });
-    });
 });

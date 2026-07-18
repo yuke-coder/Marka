@@ -16,11 +16,10 @@ interface DeviceFrameProps {
     device: DeviceFrameMode;
     scrollRef?: React.RefObject<HTMLDivElement>;
     onScroll?: () => void;
-    screenSize?: { width: number; height: number };
     children: React.ReactNode;
 }
 
-export default function DeviceFrame({ device, scrollRef, onScroll, screenSize, children }: DeviceFrameProps) {
+export default function DeviceFrame({ device, scrollRef, onScroll, children }: DeviceFrameProps) {
     const localRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -31,14 +30,21 @@ export default function DeviceFrame({ device, scrollRef, onScroll, screenSize, c
 
     const isMobile = device === 'mobile';
     const framePadding = DEVICE_FRAME_PADDING[device];
-    const displaySize = screenSize ?? DEVICE_FRAME_SIZE[device];
+    const displaySize = DEVICE_FRAME_SIZE[device];
+    const frameWidth = displaySize.width + framePadding * 2;
+    const frameHeight = displaySize.height + framePadding * 2;
     const sizeClass = isMobile
         ? 'rounded-[44px] p-2'
         : 'rounded-[36px] p-1.5';
     const screenRadiusClass = isMobile ? 'rounded-[36px]' : 'rounded-[30px]';
     const frameStyle = {
-        width: `${displaySize.width + framePadding * 2}px`,
-        height: `${displaySize.height + framePadding * 2}px`,
+        // This is deliberately CSS-only. The drag divider changes the parent
+        // width, and every preview type (including R-Markdown) receives the
+        // same width without a separate ResizeObserver or type-specific scale.
+        width: `min(100%, ${frameWidth}px)`,
+        maxWidth: '100%',
+        aspectRatio: `${frameWidth} / ${frameHeight}`,
+        boxSizing: 'border-box',
     } as React.CSSProperties;
 
     return (
@@ -51,7 +57,7 @@ export default function DeviceFrame({ device, scrollRef, onScroll, screenSize, c
             <div
                 ref={localRef}
                 onScroll={onScroll}
-                className={`w-full h-full ${screenRadiusClass} overflow-y-auto no-scrollbar bg-[#fbfbfd] dark:bg-[#1c1c1e] scroll-touch`}
+                className={`w-full h-full min-w-0 ${screenRadiusClass} overflow-y-auto no-scrollbar bg-[#fbfbfd] dark:bg-[#1c1c1e] scroll-touch`}
             >
                 {children}
             </div>

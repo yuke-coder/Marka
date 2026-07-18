@@ -68,3 +68,10 @@ export function getDocumentFeatureAvailability(
         ? DOCUMENT_RUNTIMES.markdown.availability(feature)
         : DOCUMENT_RUNTIMES.html.availability(feature);
 }
+
+export function isDocumentFeatureEnabled(
+    kind: MarkaDocumentKind,
+    feature: DocumentFeature,
+): boolean {
+    return getDocumentFeatureAvailability(kind, feature).state === 'enabled';
+}

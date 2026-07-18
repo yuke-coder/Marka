@@ -5,7 +5,6 @@ import {
     DEFAULT_AI_FORMATTING_PRESET,
     isAiFormattingPresetId,
     type AiFormattingPresetId,
-    type AiMarkdownTask,
 } from './aiFormattingPresets';
 
 interface AiMarkdownBody {
@@ -13,7 +12,6 @@ interface AiMarkdownBody {
     model?: string;
     reasoningEffort?: string;
     speed?: string;
-    task?: AiMarkdownTask;
     sourceText?: string;
     extraInstruction?: string;
 }
@@ -100,15 +98,14 @@ function buildResponsesRequestBody(args: {
     reasoningEffort: string;
     speed: string;
     presetId: AiFormattingPresetId;
-    task: AiMarkdownTask;
     sourceText: string;
     extraInstruction: string;
 }) {
     const body: Record<string, unknown> = {
         model: args.model,
         stream: true,
-        instructions: buildAiFormattingInstructions(args.presetId, args.task),
-        input: buildInput(args),
+        instructions: buildSystemInstructions(args.presetId, args.extraInstruction),
+        input: buildInput(args.sourceText),
     };
 
     const isAutoRoute = args.provider === 'doubao' && args.model === AUTO_ROUTED_MODEL;
@@ -127,7 +124,6 @@ function buildChatRequestBody(args: {
     model: string;
     reasoningEffort: string;
     presetId: AiFormattingPresetId;
-    task: AiMarkdownTask;
     sourceText: string;
     extraInstruction: string;
 }) {
@@ -135,8 +131,9 @@ function buildChatRequestBody(args: {
         model: args.model,
         stream: true,
         messages: [
-            { role: 'system', content: buildAiFormattingInstructions(args.presetId, args.task) },
-            { role: 'user', content: buildInput(args) },
+            ...(args.extraInstruction ? [{ role: 'system', content: args.extraInstruction }] : []),
+            { role: 'system', content: buildAiFormattingInstructions(args.presetId) },
+            { role: 'user', content: buildInput(args.sourceText) },
         ],
     };
 
@@ -208,13 +205,14 @@ function readJson(req: IncomingMessage): Promise<AiMarkdownBody> {
     });
 }
 
-function buildInput(body: { task: AiMarkdownTask; sourceText: string; extraInstruction: string }) {
-    const label = body.task === 'revise' ? 'Current Markdown source' : body.task === 'continue' ? 'Existing partial Markdown' : 'Source plain text';
-    const instruction = body.extraInstruction.trim() || 'No additional requirements.';
-    return [
-        `Additional user requirements:\n---\n${instruction}\n---`,
-        `${label}:\n---\n${body.sourceText.trim()}\n---`,
-    ].join('\n\n');
+function buildSystemInstructions(presetId: AiFormattingPresetId, extraInstruction: string) {
+    return [extraInstruction.trim(), buildAiFormattingInstructions(presetId)]
+        .filter(Boolean)
+        .join('\n\n');
+}
+
+function buildInput(sourceText: string) {
+    return `Source plain text:\n---\n${sourceText.trim()}\n---`;
 }
 
 export async function handleAiMarkdownRequest(req: IncomingMessage, res: ServerResponse) {
@@ -231,16 +229,15 @@ export async function handleAiMarkdownRequest(req: IncomingMessage, res: ServerR
         return;
     }
 
-    const task = body.task === 'revise' ? 'revise' : body.task === 'continue' ? 'continue' : 'generate';
     const requestedPresetId = (body.presetId || '').trim();
     const requestedModel = (body.model || '').trim();
     const requestedReasoningEffort = (body.reasoningEffort || '').trim();
     const requestedSpeed = (body.speed || '').trim();
     const sourceText = (body.sourceText || '').trim();
-    const extraInstruction = body.extraInstruction || '';
+    const extraInstruction = (body.extraInstruction || '').trim();
 
     if (requestedPresetId && !isAiFormattingPresetId(requestedPresetId)) {
-        sendJson(res, 400, { error: '请选择有效的排版方案' });
+        sendJson(res, 400, { error: '当前仅支持 R-Markdown 公众号排版' });
         return;
     }
 
@@ -255,7 +252,7 @@ export async function handleAiMarkdownRequest(req: IncomingMessage, res: ServerR
     }
 
     if (!sourceText) {
-        sendJson(res, 400, { error: task === 'generate' ? '请输入纯文本内容' : '没有可继续处理的 Markdown' });
+        sendJson(res, 400, { error: '请输入纯文本内容' });
         return;
     }
 
@@ -280,9 +277,7 @@ export async function handleAiMarkdownRequest(req: IncomingMessage, res: ServerR
     }
 
     const reasoningEffort = requestedReasoningEffort || DEFAULT_REASONING_EFFORT;
-    const presetId = isAiFormattingPresetId(requestedPresetId)
-        ? requestedPresetId
-        : DEFAULT_AI_FORMATTING_PRESET;
+    const presetId = DEFAULT_AI_FORMATTING_PRESET;
     const usesResponsesApi = provider === 'openai' || upstreamModel === AUTO_ROUTED_MODEL;
     const upstreamUrl = provider === 'doubao' && usesResponsesApi
         ? DOUBAO_RESPONSES_API_URL
@@ -297,8 +292,8 @@ export async function handleAiMarkdownRequest(req: IncomingMessage, res: ServerR
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify(usesResponsesApi
-                ? buildResponsesRequestBody({ provider, model: upstreamModel, reasoningEffort, speed: requestedSpeed || 'standard', presetId, task, sourceText, extraInstruction })
-                : buildChatRequestBody({ provider, model: upstreamModel, reasoningEffort, presetId, task, sourceText, extraInstruction })),
+                ? buildResponsesRequestBody({ provider, model: upstreamModel, reasoningEffort, speed: requestedSpeed || 'standard', presetId, sourceText, extraInstruction })
+                : buildChatRequestBody({ provider, model: upstreamModel, reasoningEffort, presetId, sourceText, extraInstruction })),
         };
         if (provider === 'openai') {
             const dispatcher = getOpenAIProxyAgent();

@@ -14,19 +14,6 @@ export interface HtmlDocument {
 
 export type MarkaDocument = MarkdownDocument | HtmlDocument;
 
-export type MarkaPreviewMode = 'themed' | 'isolated';
-
-export interface MarkaDocumentCapabilities {
-    readonly themes: boolean;
-    readonly smartPaste: boolean;
-    readonly scrollSync: boolean;
-    readonly sourceLocation: boolean;
-    readonly wordExport: boolean;
-    readonly pdfExport: boolean;
-    readonly htmlExport: boolean;
-    readonly pngExport: boolean;
-}
-
 export interface MarkaDocumentDefinition {
     readonly kind: MarkaDocumentKind;
     readonly label: 'Markdown' | 'HTML';
@@ -34,8 +21,6 @@ export interface MarkaDocumentDefinition {
     readonly fileExtension: '.md' | '.html';
     readonly mimeType: 'text/markdown;charset=utf-8' | 'text/html;charset=utf-8';
     readonly editorPlaceholder: string;
-    readonly previewMode: MarkaPreviewMode;
-    readonly capabilities: MarkaDocumentCapabilities;
 }
 
 const DOCUMENT_DEFINITIONS = {
@@ -46,17 +31,6 @@ const DOCUMENT_DEFINITIONS = {
         fileExtension: '.md',
         mimeType: 'text/markdown;charset=utf-8',
         editorPlaceholder: '在这里输入 Markdown 内容...',
-        previewMode: 'themed',
-        capabilities: {
-            themes: true,
-            smartPaste: true,
-            scrollSync: true,
-            sourceLocation: true,
-            wordExport: true,
-            pdfExport: true,
-            htmlExport: true,
-            pngExport: true,
-        },
     },
     html: {
         kind: 'html',
@@ -65,17 +39,6 @@ const DOCUMENT_DEFINITIONS = {
         fileExtension: '.html',
         mimeType: 'text/html;charset=utf-8',
         editorPlaceholder: '在这里编辑 HTML 源码...',
-        previewMode: 'isolated',
-        capabilities: {
-            themes: false,
-            smartPaste: false,
-            scrollSync: true,
-            sourceLocation: false,
-            wordExport: false,
-            pdfExport: false,
-            htmlExport: true,
-            pngExport: false,
-        },
     },
 } as const satisfies Record<MarkaDocumentKind, MarkaDocumentDefinition>;
 
@@ -92,13 +55,6 @@ export interface MarkaDocumentFragment {
 export interface MarkaDocumentEdit {
     readonly document: MarkaDocument;
     readonly cursor: number | null;
-}
-
-export type MarkaDocumentApplyMode = 'replace' | 'insert' | 'append';
-
-export interface MarkaMarkdownApplyResult extends MarkaDocumentEdit {
-    readonly document: MarkdownDocument;
-    readonly effectiveMode: MarkaDocumentApplyMode;
 }
 
 export function createMarkdownDocument(source: string): MarkdownDocument {
@@ -172,48 +128,5 @@ export function insertDocumentFragment(
     return {
         document: updateDocumentSource(document, source),
         cursor: source.length,
-    };
-}
-
-/**
- * AI produces Markdown. Applying it to an HTML document is therefore an explicit
- * type transition to a new Markdown document; mixed-source documents are forbidden.
- */
-export function applyMarkdownResult(
-    document: MarkaDocument,
-    markdown: string,
-    requestedMode: MarkaDocumentApplyMode,
-    selection?: MarkaSourceSelection,
-): MarkaMarkdownApplyResult {
-    if (!isMarkdownDocument(document) || requestedMode === 'replace') {
-        return {
-            document: createMarkdownDocument(markdown),
-            effectiveMode: 'replace',
-            cursor: null,
-        };
-    }
-
-    if (requestedMode === 'append') {
-        const source = `${document.source.trimEnd()}\n\n${markdown}`.trimStart();
-        return {
-            document: createMarkdownDocument(source),
-            effectiveMode: 'append',
-            cursor: null,
-        };
-    }
-
-    if (!selection) {
-        return {
-            document: createMarkdownDocument(markdown),
-            effectiveMode: 'replace',
-            cursor: null,
-        };
-    }
-
-    const edit = replaceSelection(document.source, markdown, selection);
-    return {
-        document: createMarkdownDocument(edit.source),
-        effectiveMode: 'insert',
-        cursor: edit.cursor,
     };
 }

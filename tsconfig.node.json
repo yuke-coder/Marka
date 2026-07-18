@@ -12,6 +12,7 @@
     "include": [
         "vite.config.ts",
         "api/**/*.ts",
-        "server/**/*.ts"
+        "server/**/*.ts",
+        "src/lib/rMarkdownSyntax.ts"
     ]
 }

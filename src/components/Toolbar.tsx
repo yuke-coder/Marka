@@ -4,10 +4,14 @@ import { Copy, Download, Upload, Smartphone, Tablet, Monitor, Loader2, Link2, Un
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     getMarkaDocumentDefinition,
-    type MarkaDocumentCapabilities,
     type MarkaDocumentDefinition,
     type MarkaDocumentKind,
 } from '../lib/markaDocument';
+import {
+    getDocumentFeatureAvailability,
+    type DocumentFeature,
+    type FeatureAvailability,
+} from '../lib/documentRuntime';
 
 export type LayoutMode = 'both' | 'edit' | 'preview';
 
@@ -296,18 +300,18 @@ function ImportButton({ onImport, compact }: { onImport: (file: File) => void; c
 }
 
 const exportItems = [
-    { id: 'source', label: 'Markdown 源文件', icon: FileText, action: 'onExportSource' as const, desc: '原始 Markdown 源码' },
-    { id: 'doc', label: 'Word 文档', icon: FileType, action: 'onExportDoc' as const, desc: '可在 Office 打开', capability: 'wordExport' as const },
-    { id: 'pdf', label: 'PDF 文档', icon: FileType2, action: 'onExportPdf' as const, desc: '适合存档与分享', capability: 'pdfExport' as const },
-    { id: 'html', label: 'HTML 文件', icon: FileCode2, action: 'onExportHtml' as const, desc: '带样式网页文件', capability: 'htmlExport' as const },
-    { id: 'png', label: 'PNG 长图', icon: ImageIcon, action: 'onExportPng' as const, desc: '社交分享长图', capability: 'pngExport' as const },
+    { id: 'source', label: 'Markdown 源文件', icon: FileText, action: 'onExportSource' as const, desc: '原始 Markdown 源码', feature: 'export.source' as const },
+    { id: 'doc', label: 'Word 文档', icon: FileType, action: 'onExportDoc' as const, desc: '可在 Office 打开', feature: 'export.word' as const },
+    { id: 'pdf', label: 'PDF 文档', icon: FileType2, action: 'onExportPdf' as const, desc: '适合存档与分享', feature: 'export.pdf' as const },
+    { id: 'html', label: 'HTML 文件', icon: FileCode2, action: 'onExportHtml' as const, desc: '带样式网页文件', feature: 'export.html' as const },
+    { id: 'png', label: 'PNG 长图', icon: ImageIcon, action: 'onExportPng' as const, desc: '社交分享长图', feature: 'export.png' as const },
 ];
 
 function exportItemAvailability(
-    capability: keyof MarkaDocumentCapabilities | undefined,
-    documentDefinition: MarkaDocumentDefinition,
-) {
-    return capability ? documentDefinition.capabilities[capability] : true;
+    feature: Extract<DocumentFeature, `export.${string}`>,
+    documentKind: MarkaDocumentKind,
+): FeatureAvailability {
+    return getDocumentFeatureAvailability(documentKind, feature);
 }
 
 function ExportDropdown({ actionMap, documentDefinition, isMobile, compact }: {
@@ -365,8 +369,11 @@ function ExportDropdown({ actionMap, documentDefinition, isMobile, compact }: {
                     </div>
                     {stableExportItems.map(item => {
                         const Icon = item.icon;
-                        const available = exportItemAvailability(item.capability, documentDefinition);
-                        const unavailableReason = `${documentDefinition.label} 文档暂不支持导出${item.label.replace('文档', '').replace('长图', '')}`;
+                        const availability = exportItemAvailability(item.feature, documentDefinition.kind);
+                        const available = availability.state === 'enabled';
+                        const unavailableReason = availability.state === 'enabled'
+                            ? undefined
+                            : availability.reason;
                         return (
                             <button
                                 key={item.id}
@@ -437,6 +444,11 @@ export function DesktopToolbar({
 }: DesktopToolbarProps) {
     const documentDefinition = getMarkaDocumentDefinition(documentKind);
     const actionMap: Record<string, () => void> = { onExportPdf, onExportHtml, onExportSource, onExportDoc, onExportPng };
+    const scrollSyncAvailability = getDocumentFeatureAvailability(documentKind, 'scroll.sync');
+    const canSyncScroll = scrollSyncAvailability.state === 'enabled';
+    const scrollSyncUnavailableReason = scrollSyncAvailability.state === 'enabled'
+        ? undefined
+        : scrollSyncAvailability.reason;
 
     return (
         <div className="flex-1 min-w-0 flex items-center justify-end px-3 lg:px-4 py-0.5 shrink-0 gap-2">
@@ -551,17 +563,17 @@ export function DesktopToolbar({
             <button
                 data-testid="scroll-sync-toggle"
                 onClick={onToggleScrollSync}
-                disabled={!documentDefinition.capabilities.scrollSync}
-                aria-disabled={!documentDefinition.capabilities.scrollSync}
-                aria-pressed={documentDefinition.capabilities.scrollSync && scrollSyncEnabled}
-                data-tooltip={!documentDefinition.capabilities.scrollSync ? `${documentDefinition.label} 文档暂不支持同步滚动` : undefined}
-                title={!documentDefinition.capabilities.scrollSync ? `${documentDefinition.label} 文档暂不支持同步滚动` : undefined}
-                className={`${tb} ${documentDefinition.capabilities.scrollSync
+                disabled={!canSyncScroll}
+                aria-disabled={!canSyncScroll}
+                aria-pressed={canSyncScroll && scrollSyncEnabled}
+                data-tooltip={scrollSyncUnavailableReason}
+                title={scrollSyncUnavailableReason}
+                className={`${tb} ${canSyncScroll
                     ? scrollSyncEnabled ? active : idle
                     : 'border-[#00000010] dark:border-[#ffffff16] text-[#8e8e93] dark:text-[#6e6e73] bg-transparent opacity-40 cursor-not-allowed'
                 }`}
             >
-                {scrollSyncEnabled && documentDefinition.capabilities.scrollSync ? <Link2 size={13} /> : <Unlink2 size={13} />}
+                {scrollSyncEnabled && canSyncScroll ? <Link2 size={13} /> : <Unlink2 size={13} />}
                 <span className="hidden md:inline">同步滚动</span>
             </button>
 

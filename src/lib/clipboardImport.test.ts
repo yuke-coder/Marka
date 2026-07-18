@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
     detectClipboardDocumentImport,
+    detectHtmlDocumentSource,
     isHtmlSource,
 } from './clipboardImport';
 
@@ -42,6 +43,12 @@ describe('HTML clipboard import detection', () => {
 
     it('recognizes signed Skill rich HTML without hijacking ordinary rich text', () => {
         const skillHtml = '<section><span leaf="">Skill HTML</span></section>';
+        expect(detectHtmlDocumentSource('Skill HTML', skillHtml)).toEqual({
+            kind: 'html-source',
+            source: skillHtml,
+            detectedFrom: 'rich-signature',
+        });
+
         expect(detectClipboardDocumentImport(clipboardData({
             'text/plain': 'Skill HTML',
             'text/html': skillHtml,
