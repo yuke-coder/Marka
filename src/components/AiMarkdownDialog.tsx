@@ -315,6 +315,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
         let currentPhase: AiGenerationPhase = 'connecting';
         let connectionTimer: number | null = null;
         let receivedText = '';
+        let receivedThinking = false;
         let connectionGateReleased = false;
 
         const setPhase = (phase: AiGenerationPhase) => {
@@ -360,6 +361,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                 {
                     signal: controller.signal,
                     onThinkingDelta: (delta) => {
+                        receivedThinking = true;
                         showStreamPhase('thinking');
                         onThinkingDelta?.(delta);
                     },
@@ -383,8 +385,10 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
             setPhase('completed');
         } catch (err) {
             cancelConnectionGate();
-            setPhase('idle');
-            if (err instanceof DOMException && err.name === 'AbortError') return;
+            const wasAborted = controller.signal.aborted
+                || (err instanceof DOMException && err.name === 'AbortError');
+            setPhase(wasAborted || receivedThinking || Boolean(receivedText) ? 'interrupted' : 'idle');
+            if (wasAborted) return;
             showNotice('生成失败', err instanceof Error ? err.message : 'AI 生成失败，请稍后重试', 'error');
         } finally {
             if (abortRef.current === controller) {

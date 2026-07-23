@@ -19,7 +19,7 @@ import Tooltip from './components/Tooltip';
 import AiMarkdownDialog from './components/AiMarkdownDialog';
 import DropOverlay from './components/DropOverlay';
 import PngExportDialog from './components/PngExportDialog';
-import { type AiGenerationPhase } from './lib/aiMarkdown';
+import { isAiGenerationActive, type AiGenerationPhase } from './lib/aiMarkdown';
 import { saveBlob } from './lib/fileSave';
 import { isInIframe, fallbackCopyText, fallbackCopyHtml } from './lib/clipboard';
 import { readFile } from './lib/fileImport';
@@ -279,7 +279,7 @@ export default function App() {
     ) => setNotice({ id: ++noticeIdRef.current, title, description, tone, ...action }), []);
     const [aiMarkdownOpen, setAiMarkdownOpen] = useState(false);
     const [aiGenerationPhase, setAiGenerationPhase] = useState<AiGenerationPhase>('idle');
-    const isAiStreaming = aiGenerationPhase !== 'idle' && aiGenerationPhase !== 'completed';
+    const isAiStreaming = isAiGenerationActive(aiGenerationPhase);
     const isAiConnecting = aiGenerationPhase === 'connecting';
     const [aiThinking, setAiThinking] = useState('');
     const [isAiThinkingExpanded, setIsAiThinkingExpanded] = useState(false);
@@ -832,7 +832,9 @@ export default function App() {
     }, [showNotice]);
 
     const isDefaultIntro = isMarkdownDocument(markaDocument) && documentSource === defaultContent;
-    const editorClearAction = !isAiStreaming && documentSource.trim().length > 0 && (hasAiGeneratedContent || !isDefaultIntro)
+    const editorClearAction = !isAiStreaming
+        && (documentSource.trim().length > 0 || aiThinking.trim().length > 0)
+        && (hasAiGeneratedContent || aiThinking.trim().length > 0 || !isDefaultIntro)
         ? requestClearEditor
         : undefined;
     const editorAbortAction = isAiStreaming ? abortAiStream : undefined;
@@ -1496,9 +1498,9 @@ export default function App() {
                     if (phase === 'thinking') {
                         setIsAiThinkingExpanded(true);
                     }
-                    if (phase === 'completed') {
+                    if (phase === 'completed' || phase === 'interrupted') {
                         aiStreamAbortRef.current = null;
-                        setHasAiGeneratedContent(true);
+                        if (phase === 'completed') setHasAiGeneratedContent(true);
                     }
                     if (phase === 'idle') {
                         aiStreamAbortRef.current = null;

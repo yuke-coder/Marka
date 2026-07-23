@@ -10,11 +10,12 @@ const phaseLabels: Array<[Exclude<AiGenerationPhase, 'idle' | 'connecting'>, str
     ['thinking', '正在思考', '正在思考…'],
     ['finalizing', '生成最终结果', '生成最终结果'],
     ['completed', '完成回答', '完成回答'],
+    ['interrupted', '已停止生成', '已停止生成'],
 ];
 
 function renderPhase(phase: AiGenerationPhase, aiThinking = '', isAiThinkingExpanded = false) {
     const html = renderToStaticMarkup(createElement(EditorPanel, {
-        source: phase === 'finalizing' || phase === 'completed' ? '# AI output' : '',
+        source: phase === 'finalizing' || phase === 'completed' || phase === 'interrupted' ? '# AI output' : '',
         onSourceChange: () => undefined,
         editorScrollRef: createRef<HTMLTextAreaElement>(),
         onEditorScroll: () => undefined,
@@ -22,7 +23,7 @@ function renderPhase(phase: AiGenerationPhase, aiThinking = '', isAiThinkingExpa
         aiThinking,
         isAiThinkingExpanded,
         onToggleAiThinkingExpanded: () => undefined,
-        aiMainTextStarted: phase === 'finalizing' || phase === 'completed',
+        aiMainTextStarted: phase === 'finalizing' || phase === 'completed' || phase === 'interrupted',
         aiGenerationPhase: phase,
     }));
 
@@ -43,32 +44,46 @@ describe('EditorPanel AI generation status', () => {
 
         expect(visibleStatus?.textContent).toBe(visibleLabel);
         expect(shimmer?.classList.contains('ai-generation-label')).toBe(true);
-        expect(shimmer?.querySelector('.ai-generation-label__highlight')?.textContent).toBe(visibleLabel);
+        expect(shimmer?.querySelector('.ai-generation-label__ghost')?.textContent).toBe(visibleLabel);
         expect(shimmer?.querySelector('.ai-generation-label__sweep')?.getAttribute('aria-hidden')).toBe('true');
         expect(panel?.getAttribute('data-ai-generation-phase')).toBe(phase);
         expect(doc.querySelector('[role="status"]')?.textContent).toBe(announcedLabel);
         expect(icon).not.toBeNull();
-        expect(icon?.classList.contains('ai-status-sparkle--active')).toBe(phase !== 'completed');
-        expect(shimmer?.classList.contains('ai-generation-label--once')).toBe(phase === 'completed');
+        const terminal = phase === 'completed' || phase === 'interrupted';
+        expect(icon?.classList.contains('ai-status-sparkle--active')).toBe(!terminal);
+        expect(shimmer?.classList.contains('ai-generation-label--once')).toBe(terminal);
     });
 
-    it('renders three animated dots only while the model is thinking', () => {
+    it('uses the DeepSeek shimmer instead of the old three-dot loader', () => {
         const thinking = renderPhase('thinking');
-        const finalizing = renderPhase('finalizing');
 
-        expect(thinking.querySelectorAll('.ai-thinking-dots > span')).toHaveLength(3);
-        expect(finalizing.querySelector('.ai-thinking-dots')).toBeNull();
+        expect(thinking.querySelector('.ai-generation-label__sweep')).not.toBeNull();
+        expect(thinking.querySelector('.ai-thinking-dots')).toBeNull();
     });
 
-    it('keeps streamed thinking content inside the gray status surface', () => {
-        const expanded = renderPhase('thinking', '先分析结构，再生成正文。', true);
+    it('renders streamed thinking content in the borderless DeepSeek surface', () => {
+        const expanded = renderPhase('thinking', '先分析 **结构**，再生成正文。', true);
         const collapsed = renderPhase('completed', '先分析结构，再生成正文。', false);
+        const surface = expanded.querySelector('[data-ai-generation-phase="thinking"]');
 
-        expect(expanded.querySelector('[data-ai-generation-phase="thinking"] [data-testid="ai-thinking-content"]')?.textContent)
-            .toBe('先分析结构，再生成正文。');
-        expect(expanded.querySelector('button')?.getAttribute('aria-expanded')).toBe('true');
+        expect(surface?.classList.contains('ai-thinking-surface')).toBe(true);
+        expect(surface?.querySelector('[data-testid="ai-thinking-content"]')?.textContent)
+            .toBe('先分析 结构，再生成正文。\n');
+        expect(surface?.querySelector('[data-testid="ai-thinking-content"] strong')?.textContent).toBe('结构');
+        expect(surface?.querySelector('[data-testid="ai-thinking-content"]')?.innerHTML).not.toContain('**');
+        expect(expanded.querySelector('[data-testid="ai-thinking-toggle"]')?.getAttribute('aria-expanded')).toBe('true');
         expect(collapsed.querySelector('[data-testid="ai-thinking-content"]')).toBeNull();
-        expect(collapsed.querySelector('button')?.getAttribute('aria-expanded')).toBe('false');
+        expect(collapsed.querySelector('[data-testid="ai-thinking-toggle"]')?.getAttribute('aria-expanded')).toBe('false');
+    });
+
+    it('keeps incomplete thinking and main text visible after interruption', () => {
+        const interrupted = renderPhase('interrupted', '尚未完成的 **思考', true);
+
+        expect(interrupted.querySelector('[data-ai-generation-phase="interrupted"]')).not.toBeNull();
+        expect(interrupted.querySelector('[data-testid="ai-thinking-content"]')?.textContent)
+            .toContain('尚未完成的 **思考');
+        expect(interrupted.querySelector('[data-testid="editor-input"]')?.textContent).toBe('# AI output');
+        expect(interrupted.querySelector('[aria-busy="false"]')).not.toBeNull();
     });
 
     it('keeps connecting out of the gray status surface', () => {
@@ -117,25 +132,21 @@ describe('EditorPanel AI generation status', () => {
         expect(editor?.classList.contains('ai-editor-input--with-status')).toBe(true);
     });
 
-    it('uses the Codex shimmer cadence, a one-shot completion, and reduced-motion fallback', () => {
+    it('uses the DeepSeek shimmer, a one-shot completion, and reduced-motion fallback', () => {
         const css = readFileSync('src/index.css', 'utf8');
         const component = readFileSync('src/components/EditorPanel.tsx', 'utf8');
 
         expect(css).toContain('animation: atom-spinner-animation-1 1s linear infinite');
         expect(css).toContain('animation: ai-status-sparkle-rotate 3s linear infinite');
-        expect(css).toContain('animation: ai-thinking-dot 1.18s ease-in-out infinite');
-        expect(component).toContain('const CODEX_SHIMMER_SWEEP_MS = 1000');
-        expect(component).toContain('const CODEX_SHIMMER_CADENCE_MS = 4000');
-        expect(component).toContain('const CODEX_SHIMMER_INITIAL_DELAY_MS = 600');
-        expect(css).toContain('-webkit-mask-image: linear-gradient(90deg, transparent 0%, black 20% 30%, transparent 50% 100%)');
-        expect(css).toContain('animation-duration: 1s');
-        expect(css).toContain('animation-timing-function: steps(48, end)');
-        expect(css).toContain('animation-iteration-count: 1');
-        expect(css).toMatch(/@keyframes ai-generation-codex-sweep\s*{[\s\S]*?from\s*{\s*transform: translateX\(-50%\);\s*}[\s\S]*?to\s*{\s*transform: translateX\(125%\);/);
-        expect(css).toMatch(/@keyframes ai-generation-codex-highlight\s*{[\s\S]*?from\s*{\s*transform: translateX\(50%\);\s*}[\s\S]*?to\s*{\s*transform: translateX\(-125%\);/);
-        expect(css).not.toContain('background-clip: text');
+        expect(css).toContain('animation: 2s ease-out infinite ai-generation-deepseek-shimmer');
+        expect(css).toContain('rgba(255, 255, 255, 0.7) 54.51%');
+        expect(css).toMatch(/@keyframes ai-generation-deepseek-shimmer\s*{[\s\S]*?0%\s*{\s*transform: translate\(-100%\);\s*}[\s\S]*?90%, 100%\s*{\s*transform: translate\(100%\);/);
+        expect(css).toMatch(/\.ai-generation-label--once \.ai-generation-label__sweep\s*{\s*animation-iteration-count: 1;/);
+        expect(css).toMatch(/\.ai-thinking-surface\s*{[\s\S]*?background: transparent;/);
+        expect(css).toMatch(/\.ai-thinking-content\s*{[\s\S]*?max-width: none;/);
         expect(css).toContain('padding-top: calc(var(--ai-status-height) + var(--ai-status-offset))');
-        expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.ai-generation-label--active \.ai-generation-label__sweep,[\s\S]*?\.ai-generation-label--active \.ai-generation-label__highlight\s*{\s*animation: none;/);
-        expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.atom-spinner \.spinner-line,[\s\S]*?\.ai-thinking-dots span,[\s\S]*?\.ai-status-sparkle--active\s*{\s*animation: none;/);
+        expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.atom-spinner \.spinner-line,[\s\S]*?\.ai-status-sparkle--active,[\s\S]*?\.ai-generation-label__sweep\s*{\s*animation: none;/);
+        expect(component).not.toContain('CODEX_SHIMMER');
+        expect(css).not.toContain('ai-generation-codex');
     });
 });

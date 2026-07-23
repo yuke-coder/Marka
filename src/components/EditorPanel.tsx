@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Check, ChevronDown, Copy } from 'lucide-react';
 import { handleSmartPaste, insertAtSelection } from '../lib/htmlToMarkdown';
 import { readClipboardContent } from '../lib/clipboard';
@@ -6,12 +6,13 @@ import {
     detectClipboardDocumentImport,
     detectHtmlDocumentSource,
 } from '../lib/clipboardImport';
-import { type AiGenerationPhase } from '../lib/aiMarkdown';
+import { isAiGenerationActive, type AiGenerationPhase } from '../lib/aiMarkdown';
 import {
     getMarkaDocumentDefinition,
     type MarkaDocumentKind,
 } from '../lib/markaDocument';
 import { isDocumentFeatureEnabled } from '../lib/documentRuntime';
+import { renderThinkingMarkdown } from '../lib/thinkingMarkdown';
 
 interface EditorPanelProps {
     source: string;
@@ -44,54 +45,12 @@ const AI_GENERATION_LABELS: Partial<Record<AiGenerationPhase, string>> = {
     thinking: '正在思考…',
     finalizing: '生成最终结果',
     completed: '完成回答',
+    interrupted: '已停止生成',
 };
 
-const CODEX_SHIMMER_SWEEP_MS = 1000;
-const CODEX_SHIMMER_CADENCE_MS = 4000;
-const CODEX_SHIMMER_INITIAL_DELAY_MS = 600;
-
 function StatusShimmerLabel({ children, once, phase }: { children: string; once: boolean; phase: AiGenerationPhase }) {
-    const labelRef = useRef<HTMLSpanElement>(null);
-
-    useEffect(() => {
-        const label = labelRef.current;
-        if (!label || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-
-        let sweepTimer: number | undefined;
-        let cadenceTimer: number | undefined;
-
-        const clearSweepTimer = () => {
-            if (sweepTimer === undefined) return;
-            window.clearTimeout(sweepTimer);
-            sweepTimer = undefined;
-        };
-
-        const runSweep = () => {
-            clearSweepTimer();
-            label.classList.remove('ai-generation-label--active');
-            label.classList.add('ai-generation-label--active');
-            sweepTimer = window.setTimeout(() => {
-                label.classList.remove('ai-generation-label--active');
-                sweepTimer = undefined;
-            }, CODEX_SHIMMER_SWEEP_MS);
-        };
-
-        const initialTimer = window.setTimeout(() => {
-            runSweep();
-            if (!once) cadenceTimer = window.setInterval(runSweep, CODEX_SHIMMER_CADENCE_MS);
-        }, CODEX_SHIMMER_INITIAL_DELAY_MS);
-
-        return () => {
-            window.clearTimeout(initialTimer);
-            clearSweepTimer();
-            if (cadenceTimer !== undefined) window.clearInterval(cadenceTimer);
-            label.classList.remove('ai-generation-label--active');
-        };
-    }, [once]);
-
     return (
         <span
-            ref={labelRef}
             className={`ai-generation-label ${once ? 'ai-generation-label--once' : ''}`}
             data-testid="ai-generation-shimmer"
             data-phase={phase}
@@ -100,7 +59,8 @@ function StatusShimmerLabel({ children, once, phase }: { children: string; once:
                 {children}
             </span>
             <span className="ai-generation-label__sweep" aria-hidden="true">
-                <span className="ai-generation-label__highlight">{children}</span>
+                <span className="ai-generation-label__highlight" />
+                <span className="ai-generation-label__ghost">{children}</span>
             </span>
         </span>
     );
@@ -195,12 +155,17 @@ export default function EditorPanel({ source, onSourceChange, editorScrollRef, o
         }
     }, [editsNativeHtmlSource, onHtmlDocumentPaste, onSourceChange, editorScrollRef]);
 
-    const isAiStreaming = aiGenerationPhase !== 'idle' && aiGenerationPhase !== 'completed';
+    const isAiStreaming = isAiGenerationActive(aiGenerationPhase);
     const showStatusPanel = aiGenerationPhase !== 'idle' && aiGenerationPhase !== 'connecting';
     const statusLabel = showStatusPanel ? AI_GENERATION_LABELS[aiGenerationPhase] ?? '' : '';
     const hasThinkingContent = Boolean(aiThinking?.trim());
     const canShowThinkingContent = hasThinkingContent && aiGenerationPhase !== 'processing';
     const isHidingEditorInput = isAiStreaming && !aiMainTextStarted;
+    const isTerminalPhase = aiGenerationPhase === 'completed' || aiGenerationPhase === 'interrupted';
+    const renderedThinking = useMemo(
+        () => hasThinkingContent ? renderThinkingMarkdown(aiThinking ?? '') : '',
+        [aiThinking, hasThinkingContent],
+    );
 
     const syncStatusPosition = useCallback((scrollTop: number) => {
         if (!statusPanelRef.current) return;
@@ -239,27 +204,20 @@ export default function EditorPanel({ source, onSourceChange, editorScrollRef, o
 
     const statusContent = (
         <>
-            <span className="inline-flex min-w-0 items-center gap-1.5">
-                <StatusSparkleIcon active={aiGenerationPhase !== 'completed'} />
+            <span className="ai-thinking-header__main">
+                <StatusSparkleIcon active={!isTerminalPhase} />
                 <StatusShimmerLabel
-                    key={aiGenerationPhase === 'completed' ? 'completed' : 'active'}
-                    once={aiGenerationPhase === 'completed'}
+                    key={isTerminalPhase ? aiGenerationPhase : 'active'}
+                    once={isTerminalPhase}
                     phase={aiGenerationPhase}
                 >
                     {aiGenerationPhase === 'thinking' ? '正在思考' : statusLabel}
                 </StatusShimmerLabel>
-                {aiGenerationPhase === 'thinking' && (
-                    <span className="ai-thinking-dots" aria-hidden="true">
-                        <span />
-                        <span />
-                        <span />
-                    </span>
-                )}
             </span>
             {canShowThinkingContent && onToggleAiThinkingExpanded && (
                 <ChevronDown
                     size={14}
-                    className={`shrink-0 transition-transform ${isAiThinkingExpanded ? 'rotate-180' : ''}`}
+                    className={`ai-thinking-chevron ${isAiThinkingExpanded ? 'rotate-180' : ''}`}
                     aria-hidden="true"
                 />
             )}
@@ -283,32 +241,32 @@ export default function EditorPanel({ source, onSourceChange, editorScrollRef, o
                 {showStatusPanel && (
                     <div
                         ref={statusPanelRef}
-                        className="absolute left-4 right-4 top-4 z-10 flex max-h-[70vh] flex-col overflow-hidden rounded-lg bg-[#f5f5f7] text-[13px] font-medium text-[#757980] sm:left-6 sm:right-6 sm:top-6 md:left-8 md:right-8 md:top-8 dark:bg-[#2c2c2e] dark:text-[#a1a1a6]"
+                        className="ai-thinking-surface absolute left-4 right-4 top-4 z-10 flex max-h-[calc(100%-2rem)] flex-col overflow-hidden sm:left-6 sm:right-6 sm:top-6 sm:max-h-[calc(100%-3rem)] md:left-8 md:right-8 md:top-8 md:max-h-[calc(100%-4rem)]"
                         data-ai-generation-phase={aiGenerationPhase}
                     >
                         {canShowThinkingContent && onToggleAiThinkingExpanded ? (
                             <button
                                 type="button"
-                                className="flex w-full flex-shrink-0 items-center justify-between gap-3 px-3 py-2.5 text-left"
+                                className="ai-thinking-header"
+                                data-testid="ai-thinking-toggle"
                                 aria-expanded={isAiThinkingExpanded}
                                 onClick={onToggleAiThinkingExpanded}
                             >
                                 {statusContent}
                             </button>
                         ) : (
-                            <div className="flex flex-shrink-0 items-center justify-between gap-3 px-3 py-2.5">
+                            <div className="ai-thinking-header">
                                 {statusContent}
                             </div>
                         )}
                         {canShowThinkingContent && isAiThinkingExpanded && (
                             <div
-                                className="min-h-0 overflow-y-auto whitespace-pre-wrap border-t border-black/[0.06] px-3 py-2.5 text-[12px] font-normal leading-5 text-[#6f6f73] dark:border-white/[0.08] dark:text-[#c7c7cc]"
+                                className="ai-thinking-content"
                                 data-testid="ai-thinking-content"
                                 role="region"
                                 aria-label="思考内容"
-                            >
-                                {aiThinking}
-                            </div>
+                                dangerouslySetInnerHTML={{ __html: renderedThinking }}
+                            />
                         )}
                     </div>
                 )}

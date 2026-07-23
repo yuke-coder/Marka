@@ -3,8 +3,12 @@ import type { AiFormattingPresetId } from './aiFormattingPresets';
 export type AiMarkdownModel = string;
 export type AiReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
 export type AiMarkdownSpeed = 'standard' | 'fast';
-export type AiGenerationPhase = 'idle' | 'connecting' | 'processing' | 'thinking' | 'finalizing' | 'completed';
+export type AiGenerationPhase = 'idle' | 'connecting' | 'processing' | 'thinking' | 'finalizing' | 'completed' | 'interrupted';
 export const AI_CONNECTION_GATE_MS = 750;
+
+export function isAiGenerationActive(phase: AiGenerationPhase): boolean {
+    return phase !== 'idle' && phase !== 'completed' && phase !== 'interrupted';
+}
 export interface AiMarkdownModelOption {
     id: AiMarkdownModel;
     label: string;
