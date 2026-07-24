@@ -1,4 +1,4 @@
-export const ZHOUZUOLUO_PROMPT = `# 任务说明
+export const STANDARD_MARKDOWN_FORMATTING_PROMPT = `# 任务说明
 
 将用户输入的纯文本内容转换为微信公众号风格的丰富排版。所有样式必须写在每个元素的 \`style=""\` 内联属性中，禁止使用 CSS 类名、外部样式表或 \`<style>\` 标签。
 

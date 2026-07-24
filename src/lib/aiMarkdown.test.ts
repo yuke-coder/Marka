@@ -7,7 +7,6 @@ const request: AiMarkdownRequest = {
     reasoningEffort: 'low',
     speed: 'standard',
     sourceText: '测试内容',
-    extraInstruction: '保留原有标题层级。',
 };
 
 function createChunkedEventStream(events: string[]): ReadableStream<Uint8Array> {
@@ -47,6 +46,7 @@ describe('streamAiMarkdown', () => {
         const onDelta = vi.fn((delta: string) => order.push(`delta:${delta}`));
         const onThinkingDelta = vi.fn();
         const onThinkingDone = vi.fn(() => order.push('thinking-done'));
+        const selectedRequest: AiMarkdownRequest = { ...request, presetId: 'standard-markdown' };
 
         const fetchMock = vi.fn(async () => new Response(createChunkedEventStream(events), {
             status: 200,
@@ -54,7 +54,7 @@ describe('streamAiMarkdown', () => {
         }));
         vi.stubGlobal('fetch', fetchMock);
 
-        const result = await streamAiMarkdown(request, {
+        const result = await streamAiMarkdown(selectedRequest, {
             onDelta,
             onThinkingDelta,
             onThinkingDone,
@@ -66,9 +66,11 @@ describe('streamAiMarkdown', () => {
         expect(onDelta.mock.calls).toEqual(answerChunks.map(chunk => [chunk]));
         expect(order).toEqual(['thinking-done', ...answerChunks.map(chunk => `delta:${chunk}`)]);
         const requestInit = (fetchMock.mock.calls as unknown as Array<[unknown, RequestInit]>)[0]?.[1];
-        expect(JSON.parse(requestInit?.body as string)).toMatchObject({
-            extraInstruction: request.extraInstruction,
+        const requestBody = JSON.parse(requestInit?.body as string);
+        expect(requestBody).toMatchObject({
+            presetId: selectedRequest.presetId,
         });
+        expect(requestBody).not.toHaveProperty('extraInstruction');
         expect(result).toBe(answerChunks.join(''));
     });
 

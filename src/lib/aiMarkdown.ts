@@ -86,7 +86,6 @@ export interface AiMarkdownRequest {
     reasoningEffort: AiReasoningEffort;
     speed: AiMarkdownSpeed;
     sourceText: string;
-    extraInstruction: string;
 }
 
 export function cleanAiMarkdown(markdown: string): string {

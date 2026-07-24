@@ -28,10 +28,12 @@ describe('AI formatting system prompts', () => {
         expect(instructions).not.toContain('Task: continue');
     });
 
-    it('accepts only the fixed R-Markdown format id', () => {
+    it('maps each supported format id to its system prompt', () => {
         expect(SERVER_DEFAULT_AI_FORMATTING_PRESET).toBe(CLIENT_DEFAULT_AI_FORMATTING_PRESET);
         expect(isAiFormattingPresetId('rmarkdown')).toBe(true);
-        expect(isAiFormattingPresetId('standard-markdown')).toBe(false);
+        expect(isAiFormattingPresetId('standard-markdown')).toBe(true);
+        expect(buildAiFormattingInstructions('standard-markdown')).toContain('主题色统一 #fa8c16');
+        expect(buildAiFormattingInstructions('standard-markdown')).toContain('仅负责调整文本版式结构');
         expect(isAiFormattingPresetId('rewrite')).toBe(false);
     });
 });

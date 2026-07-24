@@ -2,8 +2,9 @@ import {
     R_MARKDOWN_BLOCK_COMPONENTS,
     R_MARKDOWN_SELF_CLOSING_COMPONENTS,
 } from '../src/lib/rMarkdownSyntax';
+import { STANDARD_MARKDOWN_FORMATTING_PROMPT } from './prompts/standardMarkdown';
 
-export type AiFormattingPresetId = 'rmarkdown';
+export type AiFormattingPresetId = 'rmarkdown' | 'standard-markdown';
 
 export const DEFAULT_AI_FORMATTING_PRESET: AiFormattingPresetId = 'rmarkdown';
 
@@ -41,12 +42,14 @@ const RMARKDOWN_PROMPT = [
 ];
 
 export function isAiFormattingPresetId(value: unknown): value is AiFormattingPresetId {
-    return value === DEFAULT_AI_FORMATTING_PRESET;
+    return value === 'rmarkdown' || value === 'standard-markdown';
 }
 
 export function buildAiFormattingInstructions(
-    _presetId: AiFormattingPresetId,
+    presetId: AiFormattingPresetId,
 ): string {
+    if (presetId === 'standard-markdown') return STANDARD_MARKDOWN_FORMATTING_PROMPT;
+
     return [
         ...RMARKDOWN_PROMPT,
         '执行：将提供的文章排版为一篇完整、可发布的 R-Markdown 文档。',

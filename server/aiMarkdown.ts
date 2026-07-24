@@ -13,7 +13,6 @@ interface AiMarkdownBody {
     reasoningEffort?: string;
     speed?: string;
     sourceText?: string;
-    extraInstruction?: string;
 }
 
 const PROVIDERS = {
@@ -99,12 +98,11 @@ function buildResponsesRequestBody(args: {
     speed: string;
     presetId: AiFormattingPresetId;
     sourceText: string;
-    extraInstruction: string;
 }) {
     const body: Record<string, unknown> = {
         model: args.model,
         stream: true,
-        instructions: buildSystemInstructions(args.presetId, args.extraInstruction),
+        instructions: buildAiFormattingInstructions(args.presetId),
         input: buildInput(args.sourceText),
     };
 
@@ -125,13 +123,11 @@ function buildChatRequestBody(args: {
     reasoningEffort: string;
     presetId: AiFormattingPresetId;
     sourceText: string;
-    extraInstruction: string;
 }) {
     const body: Record<string, unknown> = {
         model: args.model,
         stream: true,
         messages: [
-            ...(args.extraInstruction ? [{ role: 'system', content: args.extraInstruction }] : []),
             { role: 'system', content: buildAiFormattingInstructions(args.presetId) },
             { role: 'user', content: buildInput(args.sourceText) },
         ],
@@ -205,12 +201,6 @@ function readJson(req: IncomingMessage): Promise<AiMarkdownBody> {
     });
 }
 
-function buildSystemInstructions(presetId: AiFormattingPresetId, extraInstruction: string) {
-    return [extraInstruction.trim(), buildAiFormattingInstructions(presetId)]
-        .filter(Boolean)
-        .join('\n\n');
-}
-
 function buildInput(sourceText: string) {
     return `Source plain text:\n---\n${sourceText.trim()}\n---`;
 }
@@ -234,10 +224,9 @@ export async function handleAiMarkdownRequest(req: IncomingMessage, res: ServerR
     const requestedReasoningEffort = (body.reasoningEffort || '').trim();
     const requestedSpeed = (body.speed || '').trim();
     const sourceText = (body.sourceText || '').trim();
-    const extraInstruction = (body.extraInstruction || '').trim();
 
     if (requestedPresetId && !isAiFormattingPresetId(requestedPresetId)) {
-        sendJson(res, 400, { error: '当前仅支持 R-Markdown 公众号排版' });
+        sendJson(res, 400, { error: '排版方案无效' });
         return;
     }
 
@@ -277,7 +266,9 @@ export async function handleAiMarkdownRequest(req: IncomingMessage, res: ServerR
     }
 
     const reasoningEffort = requestedReasoningEffort || DEFAULT_REASONING_EFFORT;
-    const presetId = DEFAULT_AI_FORMATTING_PRESET;
+    const presetId = isAiFormattingPresetId(requestedPresetId)
+        ? requestedPresetId
+        : DEFAULT_AI_FORMATTING_PRESET;
     const usesResponsesApi = provider === 'openai' || upstreamModel === AUTO_ROUTED_MODEL;
     const upstreamUrl = provider === 'doubao' && usesResponsesApi
         ? DOUBAO_RESPONSES_API_URL
@@ -292,8 +283,8 @@ export async function handleAiMarkdownRequest(req: IncomingMessage, res: ServerR
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify(usesResponsesApi
-                ? buildResponsesRequestBody({ provider, model: upstreamModel, reasoningEffort, speed: requestedSpeed || 'standard', presetId, sourceText, extraInstruction })
-                : buildChatRequestBody({ provider, model: upstreamModel, reasoningEffort, presetId, sourceText, extraInstruction })),
+                ? buildResponsesRequestBody({ provider, model: upstreamModel, reasoningEffort, speed: requestedSpeed || 'standard', presetId, sourceText })
+                : buildChatRequestBody({ provider, model: upstreamModel, reasoningEffort, presetId, sourceText })),
         };
         if (provider === 'openai') {
             const dispatcher = getOpenAIProxyAgent();
