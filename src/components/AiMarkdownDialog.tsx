@@ -57,7 +57,7 @@ interface WorkflowSwipeGesture {
 }
 
 const workflowTabs: ReadonlyArray<{ id: WorkflowTab; label: string }> = [
-    { id: 'format', label: '排版模式' },
+    { id: 'format', label: '原文输入' },
     { id: 'preset', label: '排版方案' },
 ];
 
@@ -434,6 +434,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
 
     const renderWorkflowTabs = (mobile: boolean) => {
         const activeIndex = activeTab === 'format' ? 0 : 1;
+        const presetLabel = AI_FORMATTING_PRESETS.find(preset => preset.id === formattingPreset)?.label ?? '排版方案';
         return (
             <div
                 className="relative inline-grid h-8 shrink-0 grid-cols-2 self-start rounded-full bg-[#f0f1f4] p-0.5 dark:bg-[#2c2c2e]"
@@ -459,7 +460,7 @@ export default function AiMarkdownDialog(props: AiMarkdownDialogProps) {
                         onClick={() => setActiveTab(tab.id)}
                         className={`relative h-7 whitespace-nowrap rounded-full px-3 font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff]/35 ${mobile ? 'text-[13px]' : 'text-[12px]'} ${activeTab === tab.id ? 'text-[#1d1d1f] dark:text-[#f5f5f7]' : 'text-[#717178] hover:text-[#3f4752] dark:text-[#a1a1a6] dark:hover:text-[#d1d1d6]'}`}
                     >
-                        <span className="block">{tab.label}</span>
+                        <span className="block">{tab.id === 'preset' ? presetLabel : tab.label}</span>
                     </button>
                 ))}
             </div>
